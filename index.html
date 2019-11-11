@@ -91,6 +91,7 @@
                         <input type="range" name="strokeWidth" class="custom-range" min="0" max="5" id="strokeWidth" value="2">
                       </div>
                     </div>
+                    <button type="button" class="btn btn-danger" onclick="deleteItem()">Delete</button>
                   </form>
                 </div>
               </div>
@@ -115,6 +116,30 @@
       <div class="col-md-9 p-0">
         <div id="container" class="canvas-area"></div>
       </div>
+
+      <div class="modal" id="connectionModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog" role="document">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Modal title</h5>
+              <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                <span aria-hidden="true">&times;</span>
+              </button>
+            </div>
+            <div class="modal-body">
+              <form>
+                <select name="item-list" id="item-list">
+                  <option value="">Select an item</option>
+                </select>
+              </form>
+            </div>
+            <div class="modal-footer">
+              <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+              <button type="button" class="btn btn-primary" onclick="createConnection()">Save changes</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     <script>
       var width = $('#container').width();
@@ -122,6 +147,8 @@
 
       var items = []
       var selectedItem
+      var connections = []
+      var openConnection
 
       var stage = new Konva.Stage({
         container: 'container',
@@ -198,15 +225,17 @@
       }
 
       var connectors = generateConnectors();
+      console.log(targets)
+      console.log(connectors)
 
       // update all objects on the canvas from the state of the app
       function updateObjects() {
-        targets.forEach(target => {
-          var node = layer.findOne('#' + target.id);
-          node.x(target.x);
-          node.y(target.y);
-        });
-        connectors.forEach(connect => {
+        // targets.forEach(target => {
+        //   var node = layer.findOne('#' + target.id);
+        //   node.x(target.x);
+        //   node.y(target.y);
+        // });
+        connections.forEach(connect => {
           var line = layer.findOne('#' + connect.id);
           var fromNode = layer.findOne('#' + connect.from);
           var toNode = layer.findOne('#' + connect.to);
@@ -411,11 +440,41 @@
       }
 
       function addItem(item) {
-        var li = `<li class="list-group-item d-flex justify-content-between align-items-center">
+        var li = `<li class="list-group-item d-flex justify-content-between align-items-center" data-toggle="modal" data-target="#connectionModal" onclick="connectionSettings()" data-id="${item._id}">
                     ${item.attrs.tooltip} ${item._id}
                     <span class="badge badge-primary badge-pill">${item.children.length}</span>
                   </li>`
         $('#canvas-connections').append(li)
+
+        var option = `<option value="${item._id}">${item.attrs.tooltip} ${item._id}</option>`
+        $('#item-list').append(option)
+
+        transformItem(item)
+        $('#collapseProperties').collapse('toggle')
+      }
+
+      function deleteItem() {
+        selectedItem.destroy();
+        selectedItem = {}
+        stage.find('Transformer').destroy();
+        layer.draw();
+      }
+
+      function transformItem(item) {
+        // remove old transformers
+        // TODO: we can skip it if current rect is already selected
+        stage.find('Transformer').destroy();
+
+        var transform = new Konva.Transformer();
+        layer.add(transform);
+        transform.attachTo(item);
+        layer.draw();
+
+        selectedItem = item;
+        $('form input[name=itemName]').val(selectedItem.attrs.tooltip)
+        $('form input[name=backgroundColor]').val(selectedItem.attrs.fill)
+        $('form input[name=strokeColor]').val(selectedItem.attrs.stroke)
+        $('form input[name=strokeWidth]').val(selectedItem.attrs.strokeWidth)
       }
 
       stage.on('click tap', function(evt) {
@@ -429,15 +488,9 @@
         if (!evt.target.hasName('transform')) {
           return;
         }
-        // remove old transformers
-        // TODO: we can skip it if current rect is already selected
-        stage.find('Transformer').destroy();
 
         // create new transformer
-        var tr = new Konva.Transformer();
-        layer.add(tr);
-        tr.attachTo(evt.target);
-        layer.draw();
+        transformItem(evt.target);
       });
 
       layer.on('click', function(evt) {
@@ -465,7 +518,36 @@
         selectedItem.draw()
       })
 
-      // updateObjects();
+      function connectionSettings() {
+        let id = parseInt($(event.target).attr('data-id'))
+        let obj = items.find(ele => {
+          return ele._id === id
+        });
+
+        $('.modal-title').text(obj.attrs.tooltip)
+        openConnection = obj
+      }
+
+      function createConnection() {
+        let id = parseInt($('#item-list').val())
+        var seletedConnection = items.find(ele => {
+          return ele._id === id
+        });
+
+        if (openConnection._id === seletedConnection._id) {
+          alert("Cannot connect same items")
+        } else {
+          var obj = {
+            id : `connector-${connections.length}`,
+            from : `target-${openConnection._id}`,
+            to : `target-${seletedConnection._id}`
+          }
+
+          connections.push(obj)
+        }
+        updateObjects()
+        $('#connectionModal').modal('toggle')
+      }
     </script>
   </body>
 </html>
