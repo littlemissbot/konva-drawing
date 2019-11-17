@@ -30,7 +30,7 @@
     </nav>
 
     <div class="canvas-container">
-      <div class="col-md-3 p-0">
+      <div class="col-md-3 p-0 br-1">
           <div id="accordion-canvas" class="canvas-accordion">
             <!-- Shapes -->
             <div class="card">
@@ -108,6 +108,33 @@
               <div id="collapseThree" class="collapse" aria-labelledby="headingThree" data-parent="#accordion-canvas">
                 <div class="card-body">
                     <ul class="list-group" id="canvas-connections"></ul>
+                </div>
+              </div>
+            </div>
+            <!-- SVGs -->
+            <div class="card">
+              <div class="card-header" id="headingFour">
+                <h2 class="mb-0">
+                  <button class="btn btn-link collapsed" type="button" data-toggle="collapse" data-target="#collapseSVGs" aria-expanded="true" aria-controls="collapseSVGs">
+                    SVGs
+                  </button>
+                </h2>
+              </div>
+              <div id="collapseSVGs" class="collapse" aria-labelledby="headingFour" data-parent="#accordion-canvas">
+                <div class="card-body">
+                    <ul class="canvas-icons">
+                      <li onclick="drawsvg('001-manufacture.svg')"><img src="svg/001-manufacture.svg"/></li>
+                      <li onclick="drawsvg('002-factory.svg')"><img src="svg/002-factory.svg"/></li>
+                      <li onclick="drawsvg('003-conveyor.svg')"><img src="svg/003-conveyor.svg"/></li>
+                      <li onclick="drawsvg('004-robot-arm.svg')"><img src="svg/004-robot-arm.svg"/></li>
+                      <li onclick="drawsvg('005-conveyor-1.svg')"><img src="svg/005-conveyor-1.svg"/></li>
+                      <li onclick="drawsvg('007-excavator.svg')"><img src="svg/007-excavator.svg"/></li>
+                      <li onclick="drawsvg('008-heavy-machinery.svg')"><img src="svg/008-heavy-machinery.svg"/></li>
+                      <li onclick="drawsvg('009-excavator-1.svg')"><img src="svg/009-excavator-1.svg"/></li>
+                      <li onclick="drawsvg('010-building-crane.svg')"><img src="svg/010-building-crane.svg"/></li>
+                      <li onclick="drawsvg('011-machinery.svg')"><img src="svg/011-machinery.svg"/></li>
+                      <li onclick="drawsvg('016-conveyor-3.svg')"><img src="svg/016-conveyor-3.svg"/></li>
+                    </ul>
                 </div>
               </div>
             </div>
@@ -230,11 +257,16 @@
 
       // update all objects on the canvas from the state of the app
       function updateObjects() {
-        // targets.forEach(target => {
-        //   var node = layer.findOne('#' + target.id);
-        //   node.x(target.x);
-        //   node.y(target.y);
-        // });
+        connections.forEach(connect => {
+          var line = new Konva.Arrow({
+            stroke: '#000000',
+            id: connect.id,
+            fill: '#000000',
+            draggable: true,
+            name: "transform",
+          });
+          layer.add(line);
+        });
         connections.forEach(connect => {
           var line = layer.findOne('#' + connect.id);
           var fromNode = layer.findOne('#' + connect.from);
@@ -279,6 +311,45 @@
       //   });
       // });
 
+      function drawsvg(name) {
+        let path = "svg/" + name
+        Konva.Image.fromURL(path, (image) => {
+          image.setAttrs({
+            x: stage.width() / 2,
+            y: stage.height() / 2,
+            width: 50,
+            height: 50,
+            draggable: true,
+            name: "transform",
+            tooltip: name,
+            id: `target-${items.length}`
+          });
+
+          items.push(image);
+
+          layer.add(image);
+          layer.draw();
+
+          addItem(image);
+
+          image.on('mousemove', function(e) {
+            var mousePos = stage.getPointerPosition();
+            tooltip.position({
+              x: mousePos.x + 5,
+              y: mousePos.y + 5
+            });
+            tooltip.text(e.target.attrs.tooltip);
+            tooltip.show();
+            tooltipLayer.batchDraw();
+          });
+
+          image.on('mouseout', function() {
+            tooltip.hide();
+            tooltipLayer.draw();
+          });
+        })
+      }
+
       function drawcircle() {
         var cir1 = new Konva.Circle({
           x: stage.width() / 2,
@@ -289,7 +360,8 @@
           strokeWidth: 2,
           draggable: true,
           name: "transform",
-          tooltip: "Circle"
+          tooltip: "Circle",
+          id: `target-${items.length}`
         });
 
         items.push(cir1);
@@ -327,7 +399,8 @@
           strokeWidth: 2,
           draggable: true,
           name: "transform",
-          tooltip: "Rectangle"
+          tooltip: "Rectangle",
+          id: `target-${items.length}`
         });
 
         items.push(rect1);
@@ -349,7 +422,8 @@
           strokeWidth: 2,
           draggable: true,
           name: "transform",
-          tooltip: "Square"
+          tooltip: "Square",
+          id: `target-${items.length}`
         });
 
         items.push(sq1);
@@ -371,7 +445,8 @@
           strokeWidth: 2,
           draggable: true,
           name: "transform",
-          tooltip: "Triangle"
+          tooltip: "Triangle",
+          id: `target-${items.length}`
         });
 
         items.push(tri1);
@@ -391,7 +466,8 @@
           strokeWidth: 2,
           lineCap: "round",
           draggable: true,
-          name: "transform"
+          name: "transform",
+          id: `target-${items.length}`
         });
 
         layer.add(lin1);
@@ -409,7 +485,8 @@
           stroke: '#000000',
           strokeWidth: 2,
           draggable: true,
-          name: "transform"
+          name: "transform",
+          id: `target-${items.length}`
         });
 
         layer.add(arr1);
@@ -428,7 +505,8 @@
           strokeWidth: 2,
           draggable: true,
           name: "transform",
-          tooltip: "Star"
+          tooltip: "Star",
+          id: `target-${items.length}`
         });
 
         items.push(str1);
@@ -440,21 +518,27 @@
       }
 
       function addItem(item) {
-        var li = `<li class="list-group-item d-flex justify-content-between align-items-center" data-toggle="modal" data-target="#connectionModal" onclick="connectionSettings()" data-id="${item._id}">
+        var li = `<li class="list-group-item d-flex justify-content-between align-items-center" data-toggle="modal" data-target="#connectionModal" onclick="connectionSettings()" data-id="${item.attrs.id}">
                     ${item.attrs.tooltip} ${item._id}
                     <span class="badge badge-primary badge-pill">${item.children.length}</span>
                   </li>`
         $('#canvas-connections').append(li)
 
-        var option = `<option value="${item._id}">${item.attrs.tooltip} ${item._id}</option>`
+        var option = `<option value="${item.attrs.id}">${item.attrs.tooltip} ${item._id}</option>`
         $('#item-list').append(option)
 
         transformItem(item)
         $('#collapseProperties').collapse('toggle')
+
+        console.log(item)
       }
 
       function deleteItem() {
         selectedItem.destroy();
+        let list = $(`#canvas-connections li[data-id=${selectedItem.attrs.id}]`);
+        $(list[0]).remove();
+        $(`#item-list option[value=${selectedItem.attrs.id}]`).remove();
+        // TODO: Remove connection of the item
         selectedItem = {}
         stage.find('Transformer').destroy();
         layer.draw();
@@ -519,9 +603,9 @@
       })
 
       function connectionSettings() {
-        let id = parseInt($(event.target).attr('data-id'))
+        let id = $(event.target).attr('data-id')
         let obj = items.find(ele => {
-          return ele._id === id
+          return ele.attrs.id === id
         });
 
         $('.modal-title').text(obj.attrs.tooltip)
@@ -529,18 +613,18 @@
       }
 
       function createConnection() {
-        let id = parseInt($('#item-list').val())
+        let id = $('#item-list').val()
         var seletedConnection = items.find(ele => {
-          return ele._id === id
+          return ele.attrs.id === id
         });
 
         if (openConnection._id === seletedConnection._id) {
           alert("Cannot connect same items")
         } else {
           var obj = {
-            id : `connector-${connections.length}`,
-            from : `target-${openConnection._id}`,
-            to : `target-${seletedConnection._id}`
+            id : `connection-${connections.length}`,
+            from : `${openConnection.attrs.id}`,
+            to : `${seletedConnection.attrs.id}`
           }
 
           connections.push(obj)

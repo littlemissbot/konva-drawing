@@ -57,3 +57,6 @@ body {
 .pw-100 {
     width: 100%;
 }
+.br-1 {
+    border: 1px solid rgba(0,0,0,.125);
+}
