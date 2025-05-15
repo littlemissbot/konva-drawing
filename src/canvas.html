@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="FrameX Canvas - Create and edit diagrams with our powerful digital whiteboard. Features include shapes, SVGs, auto-save, and more."
+    />
+    <meta
+      name="keywords"
+      content="digital whiteboard, diagramming tool, flowchart maker, wireframe tool, visual collaboration, online drawing tool, diagram software, free diagram tool"
+    />
+    <meta name="author" content="Samita Mondal" />
+    <title>FrameX | Canvas</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="assets/images/FrameX-Logo.svg"
+    />
+
+    <!-- Google tag (gtag.js) -->
+    <script
+      async
+      src="https://www.googletagmanager.com/gtag/js?id=G-XJW4NTLH7G"
+    ></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag("js", new Date());
+
+      gtag("config", "G-XJW4NTLH7G");
+    </script>
+
+    <link rel="stylesheet" href="css/style.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.3.2/css/bootstrap.min.css"
+    />
+    <style>
+      .navbar {
+        background: linear-gradient(
+          90deg,
+          #2b4c7e 60%,
+          #373c43 100%
+        ) !important;
+      }
+      .navbar-brand {
+        padding-top: 0;
+        padding-bottom: 0;
+      }
+      .btn-outline-light:hover {
+        background-color: #ffdc2e;
+        border-color: #ffdc2e;
+        color: #373c43;
+      }
+      .zoom-controls {
+        position: fixed;
+        right: 32px;
+        bottom: 32px;
+        z-index: 100;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: #fff;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(44, 62, 80, 0.1);
+        padding: 8px 14px 8px 14px;
+        min-width: 120px;
+      }
+      .zoom-btn {
+        background: none;
+        border: none;
+        color: #222;
+        font-size: 1.3rem;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: background 0.18s;
+      }
+      .zoom-btn:hover {
+        background: #f3f4f6;
+      }
+      .zoom-percentage {
+        font-size: 1rem;
+        font-weight: 500;
+        color: #222;
+        min-width: 36px;
+        text-align: center;
+      }
+      .zoom-help-btn {
+        background: #222;
+        color: #fff;
+        border: none;
+        border-radius: 50%;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        font-weight: 700;
+        margin-left: 6px;
+        cursor: pointer;
+        transition: background 0.18s;
+      }
+      .zoom-help-btn:hover {
+        background: #111;
+      }
+      .properties-panel {
+        position: fixed;
+        left: 32px;
+        bottom: 32px;
+        z-index: 100;
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 2px 12px rgba(44, 62, 80, 0.1);
+        padding: 7px 16px 7px 16px;
+        min-width: 0;
+        min-height: 0;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 0;
+      }
+      .properties-panel form {
+        width: 100%;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: nowrap;
+      }
+      .properties-panel label {
+        font-size: 0.95rem;
+        color: #444;
+        font-weight: 500;
+        margin: 0 4px 0 0;
+        padding: 0;
+        line-height: 1;
+      }
+      .properties-panel input[type="text"] {
+        width: 60px;
+        padding: 2px 6px;
+        border-radius: 5px;
+        border: 1px solid #e5e7eb;
+        font-size: 0.98rem;
+        background: #fafbfc;
+        margin-right: 2px;
+      }
+      .properties-panel input[type="color"] {
+        width: 22px;
+        height: 22px;
+        border: 1.5px solid #e5e7eb;
+        background: #fff;
+        border-radius: 50%;
+        box-shadow: 0 1px 4px rgba(44, 62, 80, 0.08);
+        cursor: pointer;
+        padding: 0;
+        margin: 0 6px 0 2px;
+        transition: border 0.18s, box-shadow 0.18s;
+      }
+      .properties-panel input[type="color"]:hover {
+        border: 1.5px solid #6366f1;
+        box-shadow: 0 2px 8px rgba(99, 102, 241, 0.1);
+      }
+      .properties-panel input[type="number"] {
+        width: 36px;
+        padding: 2px 4px;
+        border-radius: 5px;
+        border: 1px solid #e5e7eb;
+        font-size: 0.98rem;
+        background: #fafbfc;
+        text-align: center;
+        margin-left: 2px;
+      }
+      .properties-panel .divider {
+        width: 1px;
+        height: 22px;
+        background: #ececec;
+        margin: 0 10px;
+        border-radius: 1px;
+        display: inline-block;
+      }
+      .delete-icon {
+        width: 22px;
+        height: 22px;
+        margin-left: 8px;
+        cursor: pointer;
+        filter: grayscale(0.2);
+        transition: filter 0.18s, background 0.18s, border-radius 0.18s;
+        padding: 2px;
+        border-radius: 50%;
+      }
+      .delete-icon:hover {
+        background: #fee2e2;
+        filter: grayscale(0) drop-shadow(0 0 2px #ef4444);
+      }
+      .save-status {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .save-status-icon {
+        width: 16px;
+        height: 16px;
+      }
+      .save-status-icon.saving {
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        from {
+          transform: rotate(0deg);
+        }
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Floating Logo -->
+    <div class="floating-logo">
+      <a href="index.html"
+        ><img src="assets/images/FrameX-Logo.svg" alt="Logo" height="40"
+      /></a>
+    </div>
+
+    <!-- Top Right Controls -->
+    <div class="top-right-controls">
+      <span class="save-status">
+        <img
+          src="assets/icons/save-file.svg"
+          alt="Saved"
+          class="save-status-icon"
+          style="display: none"
+        />
+        <img
+          src="assets/icons/refresh.svg"
+          alt="Saving"
+          class="save-status-icon saving"
+          style="display: none"
+        />
+        <img
+          src="assets/icons/delete-canvas.svg"
+          alt="Cleared"
+          class="save-status-icon"
+          style="display: none"
+        />
+        <span class="save-status-text">All Changes Saved</span>
+      </span>
+      <button class="btn-clear" id="clearBtn">Clear</button>
+    </div>
+
+    <!-- Left Toolbar -->
+    <div class="left-toolbar">
+      <button class="toolbar-btn" id="selectTool" title="Select">
+        <img src="assets/icons/select.svg" alt="Select" />
+      </button>
+      <button class="toolbar-btn" id="pencilTool" title="Pencil">
+        <img src="assets/icons/pencil.svg" alt="Pencil" />
+      </button>
+      <button class="toolbar-btn" id="stickyTool" title="Sticky Note">
+        <img src="assets/icons/sticky.svg" alt="Sticky" />
+      </button>
+      <button class="toolbar-btn" id="textTool" title="Text">
+        <img src="assets/icons/text.svg" alt="Text" />
+      </button>
+      <button class="toolbar-btn" id="shapesTool" title="Shapes">
+        <img src="assets/icons/shapes.svg" alt="Shapes" />
+      </button>
+      <div class="toolbar-divider"></div>
+      <button class="toolbar-btn" id="undoTool" title="Undo">
+        <img src="assets/icons/undo.svg" alt="Undo" />
+      </button>
+      <button class="toolbar-btn" id="redoTool" title="Redo">
+        <img src="assets/icons/redo.svg" alt="Redo" />
+      </button>
+    </div>
+
+    <!-- Floating Shapes Menu -->
+    <div
+      class="floating-shapes-menu"
+      id="floatingShapesMenu"
+      style="display: none"
+    >
+      <div class="shapes-menu-top-row">
+        <button class="shape-menu-btn" id="addLine" title="Line">
+          <img src="assets/icons/line.svg" alt="Line" />
+        </button>
+        <button class="shape-menu-btn" id="addArrow" title="Arrow">
+          <img src="assets/icons/arrow.svg" alt="Arrow" />
+        </button>
+        <button class="shape-menu-btn" id="addPolyline" title="Polyline">
+          <img src="assets/icons/polyline.svg" alt="Polyline" />
+        </button>
+        <button class="shape-menu-btn" id="addCurvedArrow" title="Curved Arrow">
+          <img src="assets/icons/curved-arrow.svg" alt="Curved Arrow" />
+        </button>
+      </div>
+      <hr class="shapes-menu-divider" />
+      <div class="shapes-menu-grid">
+        <button class="shape-menu-btn" id="addSquare" title="Square">
+          <img src="assets/icons/square.svg" alt="Square" />
+        </button>
+        <button
+          class="shape-menu-btn"
+          id="addRoundedSquare"
+          title="Rounded Square"
+        >
+          <img src="assets/icons/rounded-square.svg" alt="Rounded Square" />
+        </button>
+        <button class="shape-menu-btn" id="addCircle" title="Circle">
+          <img src="assets/icons/circle.svg" alt="Circle" />
+        </button>
+        <button class="shape-menu-btn" id="addDiamond" title="Diamond">
+          <img src="assets/icons/diamond.svg" alt="Diamond" />
+        </button>
+        <button class="shape-menu-btn" id="addStar" title="Star">
+          <img src="assets/icons/star.svg" alt="Star" />
+        </button>
+        <button class="shape-menu-btn" id="addTriangle" title="Triangle">
+          <img src="assets/icons/triangle.svg" alt="Triangle" />
+        </button>
+        <button
+          class="shape-menu-btn"
+          id="addSpeechBubble"
+          title="Speech Bubble"
+        >
+          <img src="assets/icons/speech-bubble.svg" alt="Speech Bubble" />
+        </button>
+        <button class="shape-menu-btn" id="addArrowedBox" title="Arrowed Box">
+          <img src="assets/icons/arrowed-box.svg" alt="Arrowed Box" />
+        </button>
+      </div>
+      <button class="shapes-menu-more-btn">More shapes</button>
+    </div>
+
+    <!-- Zoom Controls: Bottom Right -->
+    <div class="zoom-controls" id="zoomControls">
+      <button class="zoom-btn" id="zoomOut" title="Zoom Out (Ctrl/Cmd -)">
+        &minus;
+      </button>
+      <span class="zoom-percentage" id="zoomPercentage">100%</span>
+      <button class="zoom-btn" id="zoomIn" title="Zoom In (Ctrl/Cmd +)">
+        +
+      </button>
+      <button class="zoom-btn" id="zoomReset" title="Reset Zoom (Ctrl/Cmd 0)">
+        ↺
+      </button>
+      <button class="zoom-btn" id="zoomFit" title="Zoom to Fit">⊞</button>
+      <button class="zoom-help-btn" id="zoomHelpBtn" title="Zoom Help">
+        ?
+      </button>
+    </div>
+
+    <!-- Properties Panel (bottom left) -->
+    <div class="properties-panel" id="propertiesPanel" style="display: none">
+      <form id="propertiesForm">
+        <label for="itemName">Name</label>
+        <input type="text" id="itemName" />
+        <span class="divider"></span>
+        <label for="backgroundColor">BG</label>
+        <input type="color" id="backgroundColor" />
+        <label for="strokeColor">Stroke</label>
+        <input type="color" id="strokeColor" />
+        <label for="strokeWidth">Width</label>
+        <input
+          type="number"
+          id="strokeWidth"
+          min="0"
+          max="10"
+          style="width: 36px"
+        />
+        <span class="divider"></span>
+        <img
+          src="assets/icons/delete.svg"
+          id="deleteBtn"
+          class="delete-icon"
+          alt="Delete"
+          title="Delete"
+        />
+      </form>
+    </div>
+
+    <!-- Canvas Area -->
+    <div class="canvas-area-container">
+      <div id="container" class="canvas-area"></div>
+      <!-- Add your first object card -->
+      <div class="add-first-object-card" id="addFirstObjectCard">
+        <img src="assets/icons/add-object.svg" alt="Add Object" height="48" />
+        <div>Add your first object</div>
+        <button class="close-card" id="closeAddObjectCard">×</button>
+      </div>
+    </div>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
