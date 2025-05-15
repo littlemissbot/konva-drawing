@@ -7,6 +7,16 @@ export default defineConfig({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["konva", "bootstrap", "jquery"],
+        },
+      },
+    },
+    assetsInlineLimit: 4096,
+    cssCodeSplit: false,
+    sourcemap: false,
   },
   resolve: {
     alias: {
@@ -16,5 +26,8 @@ export default defineConfig({
       "@services": resolve(__dirname, "./src/js/services"),
       "@assets": resolve(__dirname, "./src/assets"),
     },
+  },
+  css: {
+    devSourcemap: true,
   },
 });

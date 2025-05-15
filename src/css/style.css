@@ -740,3 +740,87 @@ h6,
     padding: 24px 12px 20px 12px;
   }
 }
+
+/* Base styles */
+html,
+body {
+  height: auto !important;
+  min-height: 100%;
+  overflow-y: auto !important;
+}
+
+/* Hero section */
+.hero {
+  background: linear-gradient(90deg, #2b4c7e 60%, #373c43 100%);
+  color: #fff;
+  padding: 8rem 0 3rem 0;
+  text-align: center;
+}
+
+.hero-title {
+  font-size: 2.5rem;
+  font-weight: bold;
+  margin-bottom: 1rem;
+}
+
+.hero-desc {
+  font-size: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.get-started-btn {
+  font-size: 1.2rem;
+  padding: 0.75rem 2.5rem;
+  border-radius: 2rem;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  background-color: #ffdc2e;
+  border-color: #ffdc2e;
+  color: #373c43;
+}
+
+.get-started-btn:hover {
+  background-color: #f5d325;
+  border-color: #f5d325;
+  color: #373c43;
+}
+
+.feature-icon {
+  font-size: 2.5rem;
+  margin-bottom: 0.5rem;
+  color: #2b4c7e;
+}
+
+.audience-card {
+  min-height: 220px;
+}
+
+.screenshot-placeholder {
+  background: #f8f9fa;
+  border: 2px dashed #dee2e6;
+  border-radius: 8px;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #aaa;
+  font-size: 1.2rem;
+  margin-bottom: 2rem;
+}
+
+.footer {
+  background: #222;
+  color: #fff;
+  padding: 2rem 0 1rem 0;
+  text-align: center;
+  font-size: 1rem;
+}
+
+.faq {
+  text-align: left;
+  max-width: 700px;
+  margin: 2rem auto 0 auto;
+}
+
+.faq h5 {
+  margin-top: 1.5rem;
+}
