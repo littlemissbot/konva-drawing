@@ -4,11 +4,15 @@ import { resolve } from "path";
 export default defineConfig({
   root: "src",
   publicDir: "../public",
-  base: "/",
+  base: "./",
   build: {
     outDir: "../dist",
     emptyOutDir: true,
     rollupOptions: {
+      input: {
+        main: resolve(__dirname, "src/index.html"),
+        canvas: resolve(__dirname, "src/canvas.html"),
+      },
       output: {
         manualChunks: {
           vendor: ["konva", "bootstrap", "jquery"],
