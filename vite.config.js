@@ -4,6 +4,7 @@ import { resolve } from "path";
 export default defineConfig({
   root: "src",
   publicDir: "../public",
+  base: "/",
   build: {
     outDir: "../dist",
     emptyOutDir: true,
@@ -29,5 +30,9 @@ export default defineConfig({
   },
   css: {
     devSourcemap: true,
+  },
+  server: {
+    port: 3000,
+    open: true,
   },
 });
