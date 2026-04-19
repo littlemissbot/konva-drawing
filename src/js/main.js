@@ -5,6 +5,8 @@ import { PropertyManager } from "./components/PropertyManager.js";
 import { SVGManager } from "./components/SVGManager.js";
 import { CanvasManager } from "./components/CanvasManager.js";
 import { TextManager } from "./components/TextManager.js";
+import { ToolManager } from "./components/ToolManager.js";
+import { HistoryManager } from "./components/HistoryManager.js";
 import { EventBus } from "./utils/EventBus.js";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import Konva from "konva";
@@ -139,10 +141,29 @@ window.addEventListener("DOMContentLoaded", () => {
   const textManager = new TextManager(canvasManager);
   canvasManager.setTextManager(textManager);
 
+  const toolManager = new ToolManager({
+    stage,
+    canvasManager,
+    textManager,
+    transformer,
+  });
+  canvasManager.setToolManager(toolManager);
+
   // Make managers globally available for menu logic
   window.shapeManager = shapeManager;
   window.textManager = textManager;
   window.canvasManager = canvasManager;
+  window.toolManager = toolManager;
+
+  document.getElementById("selectTool")?.addEventListener("click", () => {
+    toolManager.setTool("cursor");
+  });
+  document.getElementById("pencilTool")?.addEventListener("click", () => {
+    toolManager.setTool("pen");
+  });
+  document.getElementById("stickyTool")?.addEventListener("click", () => {
+    toolManager.setTool("note");
+  });
 
   // Initialize UI components
   // Removed save/load button event listeners as only auto-save is needed
@@ -187,28 +208,41 @@ window.addEventListener("DOMContentLoaded", () => {
 
   function getCurrentData() {
     return JSON.stringify({
-      shapes: canvasManager.shapes.map((shape) => {
-        const type = shape.getClassName();
-        const attrs = shape.getAttrs();
-        let extra = {};
-        if (type === "Image") {
-          extra.svgUrl =
-            shape.image() && shape.image().src
-              ? shape.image().src
-              : attrs.svgUrl || "";
-        }
-        return {
-          type,
-          attrs: {
-            ...attrs,
-            name: shape.getAttr("name") || "",
-            text: shape.getAttr("text") || "",
-            ...extra,
-          },
-        };
-      }),
+      shapes: canvasManager.shapes.map((shape) =>
+        canvasManager.toStorageShape(shape)
+      ),
     });
   }
+
+  function applyCanvasSnapshot(json) {
+    const parsed = JSON.parse(json);
+    canvasManager.clearCanvas();
+    canvasManager.reconstructShapes(parsed.shapes || []);
+    canvasManager.toolManager?.refreshInteractivity();
+    canvasManager.deselectShape();
+    transformer.nodes([]);
+    mainLayer.batchDraw();
+    updateAddFirstObjectCard();
+    updatePropertiesPanel(null);
+    try {
+      localStorage.setItem("canvasData", json);
+      lastSavedData = json;
+    } catch (e) {
+      console.error("Failed to persist canvas after undo/redo:", e);
+    }
+    savePending = false;
+  }
+
+  const historyManager = new HistoryManager({
+    getSnapshot: getCurrentData,
+    applySnapshot: applyCanvasSnapshot,
+    maxStates: 50,
+  });
+  window.historyManager = historyManager;
+
+  const debouncedHistoryCommit = debounce(() => {
+    historyManager.commit();
+  }, 400);
 
   const debouncedAutoSave = debounce(() => {
     const data = getCurrentData();
@@ -247,11 +281,26 @@ window.addEventListener("DOMContentLoaded", () => {
   window.eventBus.on("shapeAdded", markDirty);
   window.eventBus.on("shapeRemoved", markDirty);
 
+  window.eventBus.on("shapeAdded", () => {
+    historyManager.commit();
+  });
+  window.eventBus.on("shapeRemoved", () => {
+    historyManager.commit();
+  });
+  window.eventBus.on("shapeDragEnded", debouncedHistoryCommit);
+  window.eventBus.on("textEditCommitted", debouncedHistoryCommit);
+
+  transformer.on("transformend", () => {
+    debouncedHistoryCommit();
+  });
+
   // Listen for property changes
   const propertiesForm = document.getElementById("propertiesForm");
   if (propertiesForm) {
     propertiesForm.addEventListener("change", markDirty);
     propertiesForm.addEventListener("input", markDirty);
+    propertiesForm.addEventListener("change", debouncedHistoryCommit);
+    propertiesForm.addEventListener("input", debouncedHistoryCommit);
   }
 
   // Periodic save every 10 seconds
@@ -270,6 +319,7 @@ window.addEventListener("DOMContentLoaded", () => {
         if (parsed && parsed.shapes) {
           canvasManager.clearCanvas();
           canvasManager.reconstructShapes(parsed.shapes);
+          canvasManager.toolManager?.refreshInteractivity();
           mainLayer.batchDraw();
           lastSavedData = data;
           showSaveStatus("Canvas loaded");
@@ -289,6 +339,7 @@ window.addEventListener("DOMContentLoaded", () => {
     } else {
       card.style.display = "flex";
     }
+    historyManager.reset(getCurrentData());
   }
 
   // Add beforeunload event listener to warn about unsaved changes
@@ -306,14 +357,23 @@ window.addEventListener("DOMContentLoaded", () => {
   document.getElementById("clearBtn").addEventListener("click", () => {
     if (
       confirm(
-        "Are you sure you want to clear the canvas? This cannot be undone."
+        "Clear the entire canvas? You can use Undo (Ctrl+Z) to restore this version."
       )
     ) {
+      historyManager.commit();
       canvasManager.clearCanvas();
       localStorage.removeItem("canvasData");
       lastSavedData = null;
+      historyManager.commit();
       showSaveStatus("Canvas cleared");
     }
+  });
+
+  document.getElementById("undoTool")?.addEventListener("click", () => {
+    historyManager.undo();
+  });
+  document.getElementById("redoTool")?.addEventListener("click", () => {
+    historyManager.redo();
   });
 
   // Handle window resize
@@ -524,15 +584,28 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts (zoom + undo/redo)
   document.addEventListener("keydown", (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === "=") {
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && !e.target.closest("input, textarea, select")) {
+      if (e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        historyManager.undo();
+        return;
+      }
+      if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        historyManager.redo();
+        return;
+      }
+    }
+    if (mod && e.key === "=") {
       e.preventDefault();
       zoomIn();
-    } else if ((e.ctrlKey || e.metaKey) && e.key === "-") {
+    } else if (mod && e.key === "-") {
       e.preventDefault();
       zoomOut();
-    } else if ((e.ctrlKey || e.metaKey) && e.key === "0") {
+    } else if (mod && e.key === "0") {
       e.preventDefault();
       resetZoom();
     }
@@ -705,8 +778,10 @@ window.addEventListener("DOMContentLoaded", () => {
           canvasManager.clearCanvas();
           // Reconstruct shapes from saved data
           canvasManager.reconstructShapes(parsed.shapes);
+          canvasManager.toolManager?.refreshInteractivity();
           mainLayer.batchDraw();
           showSaveStatus("Canvas restored");
+          historyManager.reset(getCurrentData());
           return true;
         }
       } catch (e) {
@@ -719,5 +794,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // Call the restore function
   if (!checkAndRestoreCanvas()) {
     showSaveStatus("No saved canvas found");
+    historyManager.reset(getCurrentData());
   }
 });

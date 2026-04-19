@@ -253,6 +253,12 @@ h6,
   box-shadow: 0 4px 16px rgba(44, 62, 80, 0.12);
 }
 
+.toolbar-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
 /* Floating Shapes Menu Modern Look */
 .floating-shapes-menu {
   position: absolute;

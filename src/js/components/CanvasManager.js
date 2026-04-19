@@ -5,6 +5,7 @@ import { Line } from "konva/lib/shapes/Line";
 import { RegularPolygon } from "konva/lib/shapes/RegularPolygon";
 import { Star } from "konva/lib/shapes/Star";
 import { Image } from "konva/lib/shapes/Image";
+import { Group } from "konva/lib/Group";
 import Konva from "konva";
 
 export class CanvasManager {
@@ -16,12 +17,64 @@ export class CanvasManager {
     this.shapes = [];
     this.connections = [];
     this.textManager = null;
+    this.toolManager = null;
 
     this.setupEventListeners();
   }
 
   setTextManager(textManager) {
     this.textManager = textManager;
+  }
+
+  setToolManager(toolManager) {
+    this.toolManager = toolManager;
+  }
+
+  toStorageShape(shape) {
+    if (
+      shape.getClassName() === "Group" &&
+      shape.getAttr("toolType") === "sticky"
+    ) {
+      const rect = shape.findOne("Rect");
+      const textNode = shape.findOne("Text");
+      return {
+        type: "StickyNote",
+        attrs: {
+          x: shape.x(),
+          y: shape.y(),
+          rotation: shape.rotation(),
+          scaleX: shape.scaleX(),
+          scaleY: shape.scaleY(),
+          opacity: shape.opacity(),
+          name: shape.name(),
+          rect: rect ? rect.getAttrs() : {},
+          text: textNode
+            ? {
+                ...textNode.getAttrs(),
+                text: textNode.text(),
+              }
+            : {},
+        },
+      };
+    }
+    const type = shape.getClassName();
+    const attrs = shape.getAttrs();
+    let extra = {};
+    if (type === "Image") {
+      extra.svgUrl =
+        shape.image() && shape.image().src
+          ? shape.image().src
+          : attrs.svgUrl || "";
+    }
+    return {
+      type,
+      attrs: {
+        ...attrs,
+        name: shape.getAttr("name") || "",
+        text: shape.getAttr("text") || "",
+        ...extra,
+      },
+    };
   }
 
   setupEventListeners() {
@@ -58,6 +111,9 @@ export class CanvasManager {
   addShape(shape) {
     this.shapes.push(shape);
     this.mainLayer.add(shape);
+    if (this.toolManager) {
+      this.toolManager.registerNewShape(shape);
+    }
     this.mainLayer.batchDraw();
   }
 
@@ -67,31 +123,13 @@ export class CanvasManager {
       this.shapes.splice(index, 1);
       shape.destroy();
       this.mainLayer.batchDraw();
+      window.eventBus.emit("shapeRemoved");
     }
   }
 
   saveCanvas() {
     const data = {
-      shapes: this.shapes.map((shape) => {
-        const type = shape.getClassName();
-        const attrs = shape.getAttrs();
-        let extra = {};
-        if (type === "Image") {
-          extra.svgUrl =
-            shape.image() && shape.image().src
-              ? shape.image().src
-              : attrs.svgUrl || "";
-        }
-        return {
-          type,
-          attrs: {
-            ...attrs,
-            name: shape.getAttr("name") || "",
-            text: shape.getAttr("text") || "",
-            ...extra,
-          },
-        };
-      }),
+      shapes: this.shapes.map((shape) => this.toStorageShape(shape)),
     };
     localStorage.setItem("canvasData", JSON.stringify(data));
   }
@@ -101,6 +139,7 @@ export class CanvasManager {
     if (data && data.shapes) {
       this.clearCanvas();
       this.reconstructShapes(data.shapes);
+      this.toolManager?.refreshInteractivity();
       this.mainLayer.batchDraw();
     }
   }
@@ -137,6 +176,45 @@ export class CanvasManager {
             this.textManager.setupTextEvents(shape);
           }
           break;
+        case "StickyNote": {
+          const rectAttrs = attrs.rect || {};
+          const textAttrs = attrs.text || {};
+          const group = new Group({
+            x: attrs.x ?? 0,
+            y: attrs.y ?? 0,
+            rotation: attrs.rotation ?? 0,
+            scaleX: attrs.scaleX ?? 1,
+            scaleY: attrs.scaleY ?? 1,
+            opacity: attrs.opacity ?? 1,
+            name: attrs.name || "Note",
+            toolType: "sticky",
+            draggable: true,
+          });
+          const rectNode = new Rect({
+            width: 200,
+            height: 140,
+            ...rectAttrs,
+          });
+          const { text: noteText, ...textRest } = textAttrs;
+          const textNode = new Text({
+            x: 10,
+            y: 10,
+            width: 180,
+            fontSize: 14,
+            fontFamily: "Poppins",
+            fill: "#333333",
+            ...textRest,
+            text: noteText || "Double click to edit",
+          });
+          group.add(rectNode);
+          group.add(textNode);
+          if (this.textManager) {
+            this.textManager.setupStickyNote(group);
+          }
+          this.setupShapeEvents(group, "StickyNote");
+          this.addShape(group);
+          return;
+        }
         case "Image":
           if (attrs.svgUrl) {
             Konva.Image.fromURL(attrs.svgUrl, (image) => {
@@ -169,6 +247,10 @@ export class CanvasManager {
     shape.on("dragmove", () => {
       this.mainLayer.batchDraw();
       this.updateConnections();
+    });
+
+    shape.on("dragend", () => {
+      window.eventBus.emit("shapeDragEnded");
     });
   }
 

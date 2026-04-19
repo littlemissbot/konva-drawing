@@ -79,6 +79,7 @@ export class TextManager {
       text.show();
       this.canvasManager.mainLayer.draw();
       this.activeTextarea = null;
+      window.eventBus.emit("textEditCommitted");
     };
 
     const handleOutsideClick = (e) => {
@@ -127,6 +128,23 @@ export class TextManager {
     });
 
     text.on("dragmove", () => {
+      this.canvasManager.mainLayer.batchDraw();
+    });
+  }
+
+  setupStickyNote(group) {
+    const text = group.findOne("Text");
+    if (!text) return;
+    text.off(".stickyNote");
+    text.on("click.stickyNote", (e) => {
+      e.cancelBubble = true;
+      window.eventBus.emit("shapeSelected", group);
+    });
+    text.on("dblclick.stickyNote", (e) => {
+      e.cancelBubble = true;
+      this.startEditing(text);
+    });
+    text.on("dragmove.stickyNote", () => {
       this.canvasManager.mainLayer.batchDraw();
     });
   }

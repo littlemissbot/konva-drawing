@@ -36,7 +36,8 @@ export default defineConfig({
     devSourcemap: true,
   },
   server: {
-    port: 3000,
-    open: true,
+    port: process.env.VITE_PORT || 5173,
+    host: process.env.VITE_HOST || "0.0.0.0",
+    open: false,
   },
 });
