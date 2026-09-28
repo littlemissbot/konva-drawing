@@ -35,10 +35,6 @@
     </script>
 
     <link rel="stylesheet" href="./css/style.css" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.3.2/css/bootstrap.min.css"
-    />
   </head>
   <body>
     <!-- Floating Logo -->
@@ -110,13 +106,34 @@
         <button class="shape-menu-btn" id="addLine" title="Line">
           <img src="./assets/icons/line.svg" alt="Line" />
         </button>
-        <button class="shape-menu-btn" id="addArrow" title="Arrow">
+        <!--
+          Arrow, Polyline and Curved Arrow are placeholders for Phase 3
+          (see docs/TASKS.md P3-2): no icon asset and no ShapeManager
+          method exist yet, so the controls are hidden rather than left
+          as dead buttons.
+        -->
+        <button
+          class="shape-menu-btn"
+          id="addArrow"
+          title="Arrow"
+          style="display: none"
+        >
           <img src="./assets/icons/arrow.svg" alt="Arrow" />
         </button>
-        <button class="shape-menu-btn" id="addPolyline" title="Polyline">
+        <button
+          class="shape-menu-btn"
+          id="addPolyline"
+          title="Polyline"
+          style="display: none"
+        >
           <img src="./assets/icons/polyline.svg" alt="Polyline" />
         </button>
-        <button class="shape-menu-btn" id="addCurvedArrow" title="Curved Arrow">
+        <button
+          class="shape-menu-btn"
+          id="addCurvedArrow"
+          title="Curved Arrow"
+          style="display: none"
+        >
           <img src="./assets/icons/curved-arrow.svg" alt="Curved Arrow" />
         </button>
       </div>
@@ -125,17 +142,28 @@
         <button class="shape-menu-btn" id="addSquare" title="Square">
           <img src="./assets/icons/square.svg" alt="Square" />
         </button>
+        <button class="shape-menu-btn" id="addRectangle" title="Rectangle">
+          <img src="./assets/icons/rectangle.svg" alt="Rectangle" />
+        </button>
+        <!-- Rounded Square: Phase 3 placeholder, see docs/TASKS.md P3-2 -->
         <button
           class="shape-menu-btn"
           id="addRoundedSquare"
           title="Rounded Square"
+          style="display: none"
         >
           <img src="./assets/icons/rounded-square.svg" alt="Rounded Square" />
         </button>
         <button class="shape-menu-btn" id="addCircle" title="Circle">
           <img src="./assets/icons/circle.svg" alt="Circle" />
         </button>
-        <button class="shape-menu-btn" id="addDiamond" title="Diamond">
+        <!-- Diamond: Phase 3 placeholder, see docs/TASKS.md P3-2 -->
+        <button
+          class="shape-menu-btn"
+          id="addDiamond"
+          title="Diamond"
+          style="display: none"
+        >
           <img src="./assets/icons/diamond.svg" alt="Diamond" />
         </button>
         <button class="shape-menu-btn" id="addStar" title="Star">
@@ -144,18 +172,31 @@
         <button class="shape-menu-btn" id="addTriangle" title="Triangle">
           <img src="./assets/icons/triangle.svg" alt="Triangle" />
         </button>
+        <!--
+          Speech Bubble and Arrowed Box: Phase 3 placeholders, see
+          docs/TASKS.md P3-2.
+        -->
         <button
           class="shape-menu-btn"
           id="addSpeechBubble"
           title="Speech Bubble"
+          style="display: none"
         >
           <img src="./assets/icons/speech-bubble.svg" alt="Speech Bubble" />
         </button>
-        <button class="shape-menu-btn" id="addArrowedBox" title="Arrowed Box">
+        <button
+          class="shape-menu-btn"
+          id="addArrowedBox"
+          title="Arrowed Box"
+          style="display: none"
+        >
           <img src="./assets/icons/arrowed-box.svg" alt="Arrowed Box" />
         </button>
       </div>
-      <button class="shapes-menu-more-btn">More shapes</button>
+      <!-- "More shapes" has no handler yet; hidden until Phase 3 (P3-2). -->
+      <button class="shapes-menu-more-btn" style="display: none">
+        More shapes
+      </button>
     </div>
 
     <!-- Zoom Controls: Bottom Right -->

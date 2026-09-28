@@ -64,13 +64,12 @@ Verified against the source on the `claude/intelligent-dirac-xdd1h8` branch.
 
 **Working:** rect, square, circle, triangle, line; 16 industrial SVG icons (panel disabled in UI); text with inline edit; sticky notes; freehand pen; single-select transformer with resize and rotate; undo/redo (snapshot based, 50 states); zoom buttons, wheel and Ctrl +/-/0; auto-save to `localStorage`; clear canvas; Google Analytics.
 
-**Broken or missing:**
+**Broken or missing (as of the original audit, 28 September 2026):**
 
-- Shapes menu: `addArrow`, `addPolyline`, `addCurvedArrow`, `addRoundedSquare`, `addDiamond`, `addStar`, `addSpeechBubble`, `addArrowedBox` have no handlers. `addRectangle` handler targets a button that does not exist.
+- Shapes menu: `addArrow`, `addPolyline`, `addCurvedArrow`, `addRoundedSquare`, `addDiamond`, `addSpeechBubble`, `addArrowedBox` have no handlers, and none of their icon assets exist. `addStar` has both a button and a `ShapeManager.createStar` method but the two were never wired together. `addRectangle` had a handler but no matching button, so `createRectangle` was unreachable from the UI.
 - Connectors: `CanvasManager.connections`, `updateConnections`, `getConnectionPoints` exist but nothing creates a connection; centre maths is wrong for `Circle` and scaled images.
 - No Delete/Backspace, Escape, copy/paste, duplicate, select-all, arrow-key nudge.
 - Only one node can be selected. No marquee, group, lock or z-order controls.
-- Freehand strokes are created with `listening: false` and can never be selected or deleted individually.
 - No export of any kind. No import. No print.
 - Saved SVG icons are persisted by absolute `image().src`, so drawings break on a domain change.
 - Two load paths run on start (`autoLoad` and `checkAndRestoreCanvas`); a nested `DOMContentLoaded` listener never fires.
@@ -78,8 +77,17 @@ Verified against the source on the `claude/intelligent-dirac-xdd1h8` branch.
 - Properties panel: `PropertyManager.updateForm` is disabled and references a `#textContent` input that is not in the HTML; live logic is duplicated in `main.js`.
 - Icons are rasterised at 50 × 50 px by `Konva.Image.fromURL`, so they blur when enlarged.
 - Zoom is clamped to 20 to 200 percent and zooms around the stage origin rather than the pointer.
-- No tests. jQuery is a dependency but never imported. Bootstrap is loaded from both npm and a CDN.
+- No tests. jQuery is a dependency but never imported. Bootstrap CSS was loaded from a CDN while Bootstrap JS was bundled from npm.
 - `sitemap.xml` last modified 2024; no `og:image`.
+
+**Found during Phase 0 implementation, not in the original audit.** Fixing P0-3 (icon persistence) surfaced two more severe bugs the static read-through missed, both confirmed with headless-browser (Playwright) checks against the built app rather than assumed from source:
+
+- The 16 SVG icon files under `src/assets/svgs/` were never copied into the production build at all. They are referenced only via a runtime-built string (`` `assets/svgs/${svgFile}` `` inside `SVGManager.createSVG`), which Vite's static asset scanner cannot see, so it never bundled or copied them. In a built/deployed app, `Konva.Image.fromURL` was fetching the SPA-fallback HTML (`content-type: text/html`) instead of an SVG, and silently failing to load, for every one of the 16 icons — independent of, and more fundamental than, the absolute-URL persistence bug the original audit flagged. This means the icon feature could not have worked in production even before this audit, regardless of the icon panel being disabled.
+- `SVGManager.setupSVGEvents` calls `canvasManager.updateTooltip()` and `canvasManager.hideTooltip()` on every icon hover; neither method existed on `CanvasManager`, so hovering an icon threw an uncaught `TypeError`. The `tooltipLayer` these methods needed was already created and plumbed through by `main.js` but had never been used by anything.
+
+**Corrected from the original audit.** One claim in the first pass of this audit did not hold up under testing and is recorded here rather than silently dropped: freehand pen strokes were reported as permanently unselectable because they are created with `listening: false`. A headless-browser check (Playwright against the built app) showed this is wrong — `ToolManager._syncShapePointerMode()` re-enables `listening` and `draggable` on every shape, freehand strokes included, whenever the active tool changes. A stroke drawn with the pen tool becomes selectable, draggable and deletable as soon as the user switches to the select tool. No fix was needed; see `docs/TASKS.md` P0-5.
+
+**Fixed in Phase 0** (see `docs/TASKS.md` for task IDs): jQuery removed, Bootstrap CSS self-hosted (P0-1); Rectangle and Star wired up, remaining unimplemented shape buttons hidden with a Phase 3 pointer instead of left dead (P0-6); Delete/Backspace/Escape shortcuts added, suppressed while typing (P0-7); text-editing overlay now sizes and rotates correctly at any zoom level and after panning, verified at 100% and 200% zoom (P0-4); SVG icons now ship in the production build, persist by relative filename instead of an absolute URL (with a migration fallback for old saves), and no longer crash on hover (P0-3).
 
 ---
 

@@ -58,21 +58,38 @@ export class CanvasManager {
       };
     }
     const type = shape.getClassName();
-    const attrs = shape.getAttrs();
-    let extra = {};
     if (type === "Image") {
-      extra.svgUrl =
-        shape.image() && shape.image().src
-          ? shape.image().src
-          : attrs.svgUrl || "";
+      // Image nodes carry the live HTMLImageElement under the "image"
+      // attr, which is not serializable (and not meaningful) JSON, so
+      // this type gets an explicit allow-list instead of the generic
+      // attrs spread used below. iconFile is the origin-independent
+      // asset reference; see SVGManager.createSVG for why we don't
+      // persist image.image().src (an absolute, origin-baked URL).
+      const attrs = shape.getAttrs();
+      return {
+        type,
+        attrs: {
+          x: shape.x(),
+          y: shape.y(),
+          width: shape.width(),
+          height: shape.height(),
+          rotation: shape.rotation(),
+          scaleX: shape.scaleX(),
+          scaleY: shape.scaleY(),
+          opacity: shape.opacity(),
+          draggable: shape.draggable(),
+          name: shape.getAttr("name") || "",
+          iconFile: attrs.iconFile || "",
+        },
+      };
     }
+    const attrs = shape.getAttrs();
     return {
       type,
       attrs: {
         ...attrs,
         name: shape.getAttr("name") || "",
         text: shape.getAttr("text") || "",
-        ...extra,
       },
     };
   }
@@ -215,20 +232,48 @@ export class CanvasManager {
           this.addShape(group);
           return;
         }
-        case "Image":
-          if (attrs.svgUrl) {
-            Konva.Image.fromURL(attrs.svgUrl, (image) => {
+        case "Image": {
+          // Prefer the relative iconFile key (current format). Fall back
+          // to the legacy absolute svgUrl saved by older versions of
+          // this app: the folder convention (assets/svgs/<file>) never
+          // changed, so the basename of that stale URL still identifies
+          // the right icon even though the full URL (baked to whatever
+          // origin/path was live when it was saved) is not directly
+          // usable. This keeps pre-fix saved drawings loadable rather
+          // than silently dropping those shapes.
+          const iconFile =
+            attrs.iconFile || (attrs.svgUrl || "").split("/").pop() || "";
+          if (!iconFile) break;
+          const url = `assets/svgs/${iconFile}`;
+          Konva.Image.fromURL(
+            url,
+            (image) => {
               image.setAttrs({
-                ...attrs,
-                image: image.image(),
+                x: attrs.x,
+                y: attrs.y,
+                width: attrs.width,
+                height: attrs.height,
+                rotation: attrs.rotation || 0,
+                scaleX: attrs.scaleX ?? 1,
+                scaleY: attrs.scaleY ?? 1,
+                opacity: attrs.opacity ?? 1,
+                name: attrs.name || "",
                 draggable: true,
+                iconFile,
               });
               this.setupShapeEvents(image, "SVG");
               this.addShape(image);
-            });
-            return;
-          }
-          break;
+            },
+            () => {
+              console.warn(
+                `FrameX: could not load saved icon "${iconFile}" ` +
+                  `(from ${url}); the shape was dropped from the ` +
+                  `restored canvas.`
+              );
+            }
+          );
+          return;
+        }
         default:
           break;
       }
@@ -252,6 +297,55 @@ export class CanvasManager {
     shape.on("dragend", () => {
       window.eventBus.emit("shapeDragEnded");
     });
+  }
+
+  // Minimal hover tooltip on the dedicated tooltipLayer (already created
+  // and passed in by main.js, but previously unused: SVGManager called
+  // these two methods on every icon mouseover/mouseout, and since they
+  // did not exist, hovering an SVG icon threw a TypeError. That code
+  // path was unreachable in production until this same change fixed
+  // the icon build/persistence pipeline (docs/TASKS.md P0-3), which is
+  // why the crash was never observed in practice.
+  updateTooltip(text, x, y) {
+    if (!this.tooltipLayer) return;
+    this.hideTooltip();
+    const label = new Konva.Label({
+      x: x + 12,
+      y: y - 12,
+      listening: false,
+    });
+    label.add(
+      new Konva.Tag({
+        fill: "#1f2937",
+        cornerRadius: 4,
+        pointerDirection: "left",
+        pointerWidth: 6,
+        pointerHeight: 6,
+        shadowColor: "black",
+        shadowBlur: 4,
+        shadowOpacity: 0.2,
+      })
+    );
+    label.add(
+      new Konva.Text({
+        text: text || "",
+        fontFamily: "Poppins, sans-serif",
+        fontSize: 12,
+        padding: 6,
+        fill: "#ffffff",
+      })
+    );
+    this._tooltipLabel = label;
+    this.tooltipLayer.add(label);
+    this.tooltipLayer.batchDraw();
+  }
+
+  hideTooltip() {
+    if (this._tooltipLabel) {
+      this._tooltipLabel.destroy();
+      this._tooltipLabel = null;
+      this.tooltipLayer?.batchDraw();
+    }
   }
 
   updateConnections() {

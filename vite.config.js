@@ -15,7 +15,7 @@ export default defineConfig({
       },
       output: {
         manualChunks: {
-          vendor: ["konva", "bootstrap", "jquery"],
+          vendor: ["konva", "bootstrap"],
         },
       },
     },

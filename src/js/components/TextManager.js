@@ -37,6 +37,19 @@ export class TextManager {
       this.removeTextarea();
     }
 
+    // text.absolutePosition() already composes the Stage's own x/y/scale
+    // (Konva has no separate "pan" transform: pan and zoom both live on
+    // the Stage node itself, and Node.getAbsoluteTransform() walks every
+    // ancestor including the Stage), so this position is correct at any
+    // zoom level and after any pan without further adjustment. What was
+    // NOT accounted for below is that text.width()/height()/fontSize()
+    // are local (unscaled) values: the textarea's CSS box must be scaled
+    // up or down by the node's current absolute scale to visually match
+    // the canvas glyphs, and rotated to match a rotated text node (the
+    // transformer allows rotating Text). getAbsoluteScale().x/.y can
+    // differ if a rotated ancestor has non-uniform scale, but for this
+    // app's shapes (uniform-scale groups, unrotated stage) x and y are
+    // equal; .x is used throughout as the single scale factor.
     const textPosition = text.absolutePosition();
     const stageBox = this.canvasManager.stage
       .container()
@@ -45,6 +58,8 @@ export class TextManager {
       x: stageBox.left + textPosition.x,
       y: stageBox.top + textPosition.y,
     };
+    const scale = text.getAbsoluteScale().x;
+    const rotation = text.getAbsoluteRotation();
 
     const textarea = document.createElement("textarea");
     document.body.appendChild(textarea);
@@ -54,9 +69,10 @@ export class TextManager {
     textarea.style.position = "absolute";
     textarea.style.top = areaPosition.y + "px";
     textarea.style.left = areaPosition.x + "px";
-    textarea.style.width = text.width() - text.padding() * 2 + "px";
-    textarea.style.height = (text.height() - text.padding() * 2) * 1.2 + "px";
-    textarea.style.fontSize = text.fontSize() + "px";
+    textarea.style.width = (text.width() - text.padding() * 2) * scale + "px";
+    textarea.style.height =
+      (text.height() - text.padding() * 2) * 1.2 * scale + "px";
+    textarea.style.fontSize = text.fontSize() * scale + "px";
     textarea.style.border = "none";
     textarea.style.padding = "4px";
     textarea.style.margin = "0px";
@@ -66,7 +82,11 @@ export class TextManager {
     textarea.style.resize = "none";
     textarea.style.lineHeight = text.lineHeight();
     textarea.style.fontFamily = text.fontFamily();
+    // Rotation happens around the node's untransformed top-left corner
+    // (Text defaults to offsetX/offsetY 0), matching transform-origin
+    // "left top" applied to a CSS-absolute box anchored at that corner.
     textarea.style.transformOrigin = "left top";
+    textarea.style.transform = rotation ? `rotate(${rotation}deg)` : "";
     textarea.style.textAlign = text.align();
     textarea.style.color = text.fill();
     textarea.style.zIndex = "1000";
@@ -101,12 +121,19 @@ export class TextManager {
       }
     });
 
+    // Re-applies the same scale-aware sizing as above. text.width()/
+    // fontSize() don't change from typing, so this is mainly a guard
+    // against the stage being zoomed (Ctrl/Cmd +/-/0 and wheel-zoom are
+    // not disabled while a textarea has focus) while editing is open;
+    // it was previously dividing by scale, which is backwards and made
+    // the box shrink as the user zoomed in.
     textarea.addEventListener("input", () => {
-      const scale = text.getAbsoluteScale().x;
-      textarea.style.width = (text.width() - text.padding() * 2) / scale + "px";
+      const liveScale = text.getAbsoluteScale().x;
+      textarea.style.width =
+        (text.width() - text.padding() * 2) * liveScale + "px";
       textarea.style.height =
-        ((text.height() - text.padding() * 2) * 1.2) / scale + "px";
-      textarea.style.fontSize = text.fontSize() / scale + "px";
+        (text.height() - text.padding() * 2) * 1.2 * liveScale + "px";
+      textarea.style.fontSize = text.fontSize() * liveScale + "px";
     });
 
     setTimeout(() => {

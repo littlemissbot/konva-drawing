@@ -154,6 +154,10 @@ window.addEventListener("DOMContentLoaded", () => {
   window.textManager = textManager;
   window.canvasManager = canvasManager;
   window.toolManager = toolManager;
+  // svgManager.createSVG() has no UI entry point yet: the icon panel is
+  // disabled pending docs/TASKS.md P7-1. Exposed here for consistency
+  // with the other managers and so it is reachable ahead of that work.
+  window.svgManager = svgManager;
 
   document.getElementById("selectTool")?.addEventListener("click", () => {
     toolManager.setTool("cursor");
@@ -608,6 +612,35 @@ window.addEventListener("DOMContentLoaded", () => {
     } else if (mod && e.key === "0") {
       e.preventDefault();
       resetZoom();
+      return;
+    }
+
+    // Delete/Backspace removes the current selection. Suppressed while
+    // typing in an input/textarea/select (e.g. the properties panel's
+    // Name field) so correcting a typo never deletes the shape.
+    if (
+      (e.key === "Delete" || e.key === "Backspace") &&
+      !e.target.closest("input, textarea, select")
+    ) {
+      if (canvasManager.selectedShape) {
+        e.preventDefault();
+        canvasManager.removeShape(canvasManager.selectedShape);
+        canvasManager.deselectShape();
+        updatePropertiesPanel(null);
+      }
+      return;
+    }
+
+    // Escape deselects the current shape and returns to the select tool.
+    // Also suppressed while typing; the inline text editor handles its
+    // own Escape to cancel editing (see TextManager.startEditing).
+    if (e.key === "Escape" && !e.target.closest("input, textarea, select")) {
+      e.preventDefault();
+      toolManager.setTool("cursor");
+      canvasManager.deselectShape();
+      transformer.nodes([]);
+      updatePropertiesPanel(null);
+      mainLayer.batchDraw();
     }
   });
 
@@ -662,13 +695,16 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   // Add shape/text to canvas on menu button click
+  // Arrow, Polyline, Curved Arrow, Rounded Square, Diamond, Speech Bubble
+  // and Arrowed Box are Phase 3 work (docs/TASKS.md P3-2): their buttons
+  // are hidden in canvas.html until ShapeManager implements them.
   const shapeBtnMap = [
     { id: "addSquare", method: "createSquare" },
     { id: "addRectangle", method: "createRectangle" },
     { id: "addCircle", method: "createCircle" },
     { id: "addTriangle", method: "createTriangle" },
+    { id: "addStar", method: "createStar" },
     { id: "addLine", method: "createLine" },
-    { id: "addArrow", method: "createArrow" },
   ];
 
   shapeBtnMap.forEach(({ id, method }) => {
