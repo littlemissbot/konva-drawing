@@ -23,6 +23,7 @@
  * @param {() => void} [deps.openExportDialog] Ctrl+E (docs/TASKS.md P1-8):
  *   the PNG/JPEG/PDF export dialog, as opposed to exportJson's direct
  *   Ctrl+S download.
+ * @param {() => void} [deps.printCanvas] Ctrl+P (docs/TASKS.md P1-9).
  * @returns {() => void} an unbind function, for tests or a future
  *   settings/help-overlay feature that needs to temporarily suspend
  *   shortcuts.
@@ -40,6 +41,7 @@ export function bindShortcuts({
   exportJson,
   triggerImport,
   openExportDialog,
+  printCanvas,
 }) {
   function handleKeydown(e) {
     const mod = e.ctrlKey || e.metaKey;
@@ -83,6 +85,14 @@ export function bindShortcuts({
       if (key === "e") {
         e.preventDefault();
         openExportDialog?.();
+        return;
+      }
+      // Ctrl/Cmd+P: print (docs/TASKS.md P1-9). Always prevented so the
+      // browser's own print dialog never opens against the app's full
+      // page (toolbars, panels and all) instead of just the drawing.
+      if (key === "p") {
+        e.preventDefault();
+        printCanvas?.();
         return;
       }
     }

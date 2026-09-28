@@ -19,6 +19,7 @@ import {
   runExport,
   suggestedExportFilename,
 } from "./ui/ExportDialog.js";
+import { printCanvas } from "./ui/Print.js";
 import { bindShortcuts } from "./ui/Shortcuts.js";
 // The named import (not a bare `import "bootstrap/.../bootstrap.bundle.min.js"`
 // side-effect import) matters: that bundle is a UMD build whose global-
@@ -870,12 +871,24 @@ window.addEventListener("DOMContentLoaded", async () => {
     Modal.getOrCreateInstance(exportModalEl).show();
   }
 
+  // --- Print (docs/TASKS.md P1-9, Ctrl+P) ---
+  function printCanvasNow() {
+    const result = printCanvas(stage);
+    if (!result.ok) {
+      // Same failure shape and only failure mode as the export dialog's
+      // own "empty canvas" case (see ui/ExportDialog.js) - an alert is
+      // enough here since, unlike the dialog, there's no persistent
+      // error area a keyboard-only shortcut could show it in.
+      alert(result.message);
+    }
+  }
+
   // All global keyboard shortcuts (undo/redo, zoom, delete, escape,
-  // JSON export/import, the export dialog) live in ui/Shortcuts.js, not
-  // inline here - see that file for behavior and comments.
-  // updatePropertiesPanel is a hoisted function declaration defined
-  // further down in this same scope; passing it here is safe regardless
-  // of source order since this call only runs once the whole
+  // JSON export/import, the export dialog, print) live in
+  // ui/Shortcuts.js, not inline here - see that file for behavior and
+  // comments. updatePropertiesPanel is a hoisted function declaration
+  // defined further down in this same scope; passing it here is safe
+  // regardless of source order since this call only runs once the whole
   // DOMContentLoaded handler's declarations have all been hoisted.
   bindShortcuts({
     historyManager,
@@ -890,6 +903,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     exportJson,
     triggerImport,
     openExportDialog,
+    printCanvas: printCanvasNow,
   });
 
   // Button event listeners
