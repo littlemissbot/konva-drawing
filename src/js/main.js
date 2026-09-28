@@ -545,13 +545,19 @@ window.addEventListener("DOMContentLoaded", () => {
   // Keyboard shortcuts (zoom + undo/redo)
   document.addEventListener("keydown", (e) => {
     const mod = e.ctrlKey || e.metaKey;
+    // e.key reflects Shift: the "Z" key reports "z" normally but "Z"
+    // (uppercase) once Shift is held, so Ctrl+Shift+Z never matched
+    // e.key === "z" here before this fix and the standard redo shortcut
+    // silently did nothing (Ctrl+Y still worked). Comparing lower-cased
+    // is robust to Shift and to CapsLock.
+    const key = e.key.toLowerCase();
     if (mod && !e.target.closest("input, textarea, select")) {
-      if (e.key === "z" && !e.shiftKey) {
+      if (key === "z" && !e.shiftKey) {
         e.preventDefault();
         historyManager.undo();
         return;
       }
-      if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
+      if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
         historyManager.redo();
         return;
