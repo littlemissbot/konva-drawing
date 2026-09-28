@@ -314,38 +314,6 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }, 10000);
 
-  // Auto-load on page load
-  function autoLoad() {
-    const data = localStorage.getItem("canvasData");
-    if (data) {
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed && parsed.shapes) {
-          canvasManager.clearCanvas();
-          canvasManager.reconstructShapes(parsed.shapes);
-          canvasManager.toolManager?.refreshInteractivity();
-          mainLayer.batchDraw();
-          lastSavedData = data;
-          showSaveStatus("Canvas loaded");
-        }
-      } catch (e) {
-        showSaveStatus("Failed to load canvas");
-      }
-    }
-    // After loading, show/hide the add object card
-    const card = document.getElementById("addFirstObjectCard");
-    if (
-      window.canvasManager &&
-      window.canvasManager.shapes &&
-      window.canvasManager.shapes.length > 0
-    ) {
-      card.style.display = "none";
-    } else {
-      card.style.display = "flex";
-    }
-    historyManager.reset(getCurrentData());
-  }
-
   // Add beforeunload event listener to warn about unsaved changes
   window.addEventListener("beforeunload", (e) => {
     if (savePending) {
@@ -353,9 +321,6 @@ window.addEventListener("DOMContentLoaded", () => {
       e.returnValue = "";
     }
   });
-
-  // Call autoLoad after a short delay to ensure all components are initialized
-  setTimeout(autoLoad, 100);
 
   // Clear Canvas button
   document.getElementById("clearBtn").addEventListener("click", () => {
@@ -415,25 +380,14 @@ window.addEventListener("DOMContentLoaded", () => {
     window.eventBus.on("shapeAdded", updateAddFirstObjectCard);
     window.eventBus.on("shapeRemoved", updateAddFirstObjectCard);
   }
-  // Also call on load
-  window.addEventListener("DOMContentLoaded", () => {
-    // Try to load canvas data from localStorage
-    let hasShapes = false;
-    const data = localStorage.getItem("canvasData");
-    if (data) {
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed && parsed.shapes && parsed.shapes.length > 0) {
-          hasShapes = true;
-        }
-      } catch (e) {}
-    }
-    if (hasShapes) {
-      document.getElementById("addFirstObjectCard").style.display = "none";
-    } else {
-      document.getElementById("addFirstObjectCard").style.display = "flex";
-    }
-  });
+  // The card's initial state (shown/hidden based on saved data) is set
+  // once by loadSavedCanvas() near the end of this handler, not here:
+  // this file's own top-level listener (line 23) IS the DOMContentLoaded
+  // handler, so a second `window.addEventListener("DOMContentLoaded", …)`
+  // nested inside it (as this used to be) registers after the event has
+  // already fired and never runs. Registering it here duplicated that
+  // dead logic a third time (see loadSavedCanvas and the removed
+  // autoLoad) without ever executing.
 
   // --- Zoom Controls Logic ---
   let zoomLevel = 1;
@@ -803,33 +757,47 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Add a function to check and restore canvas data
-  function checkAndRestoreCanvas() {
+  // Single entry point for loading a saved drawing on startup. This
+  // replaces three previous, partially-redundant load paths that ran on
+  // every page load (docs/TASKS.md P0-2): a synchronous
+  // checkAndRestoreCanvas() call right here, a setTimeout(autoLoad, 100)
+  // that unconditionally re-ran the same reconstruction ~100ms later on
+  // top of whatever checkAndRestoreCanvas had already loaded, and a
+  // nested `DOMContentLoaded` listener (dead code - this whole file is
+  // already inside the outer DOMContentLoaded handler, so a second one
+  // registered from within it fires too late to ever run) that
+  // duplicated the card-visibility check a third time. Called once,
+  // synchronously, at the end of this handler: every manager it touches
+  // (canvasManager, historyManager, toolManager) is already constructed
+  // by this point, so no artificial delay is needed.
+  function loadSavedCanvas() {
     const data = localStorage.getItem("canvasData");
     if (data) {
       try {
         const parsed = JSON.parse(data);
         if (parsed && parsed.shapes && parsed.shapes.length > 0) {
-          // Clear existing canvas
           canvasManager.clearCanvas();
-          // Reconstruct shapes from saved data
           canvasManager.reconstructShapes(parsed.shapes);
           canvasManager.toolManager?.refreshInteractivity();
           mainLayer.batchDraw();
+          lastSavedData = data;
           showSaveStatus("Canvas restored");
           historyManager.reset(getCurrentData());
-          return true;
+          updateAddFirstObjectCard();
+          return;
         }
       } catch (e) {
         console.error("Failed to restore canvas:", e);
+        showSaveStatus("Failed to load canvas");
+        historyManager.reset(getCurrentData());
+        updateAddFirstObjectCard();
+        return;
       }
     }
-    return false;
-  }
-
-  // Call the restore function
-  if (!checkAndRestoreCanvas()) {
     showSaveStatus("No saved canvas found");
     historyManager.reset(getCurrentData());
+    updateAddFirstObjectCard();
   }
+
+  loadSavedCanvas();
 });
