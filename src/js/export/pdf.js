@@ -8,9 +8,20 @@
  * canvas's, so this is a documented best-effort approximation, matched
  * to what Konva's own official PDF-export recipe does and states as a
  * known limitation, not a gap specific to this implementation).
+ *
+ * jsPDF is loaded via a dynamic import() inside exportPdf(), not a
+ * static top-level one, and this module's own consumers (ui/
+ * ExportDialog.js, main.js) all await it through to the top rather than
+ * importing jsPDF themselves. jsPDF minifies to ~340KB on its own
+ * (docs/TASKS.md P1-8's bundle-size regression, caught by comparing
+ * `npm run build` output before/after wiring the export dialog into the
+ * real app for the first time) - most sessions never touch PDF export
+ * at all, so a static import would make every one of them pay for it on
+ * every page load. A dynamic import splits jsPDF into its own chunk
+ * that's only ever fetched the moment someone actually exports (or
+ * previews) a PDF.
  */
 
-import { jsPDF } from "jspdf";
 import { getContentBoundingBox, exportRaster } from "./raster.js";
 
 // CSS-px page dimensions at 96 DPI - the standard used throughout this
@@ -97,9 +108,9 @@ function addTextLayer(pdf, textEntries, { scale, offsetX, offsetY }) {
  *   defaults to white.
  * @param {boolean} [options.selectableText] add the invisible text
  *   layer described above.
- * @returns {{ ok: true, blob: Blob, dataUrl: string } | { ok: false, reason: string, message: string }}
+ * @returns {Promise<{ ok: true, blob: Blob, dataUrl: string } | { ok: false, reason: string, message: string }>}
  */
-export function exportPdf(stage, options = {}) {
+export async function exportPdf(stage, options = {}) {
   const {
     pageSize = "fit",
     orientation = "landscape",
@@ -133,6 +144,11 @@ export function exportPdf(stage, options = {}) {
     background,
   });
   if (!raster.ok) return raster;
+
+  // Deferred until every early-return validation/emptiness check above
+  // has already passed, so a request that's rejected outright never
+  // pays for loading jsPDF's chunk at all.
+  const { jsPDF } = await import("jspdf");
 
   let pdf, imageX, imageY, imageW, imageH, textTransform;
 

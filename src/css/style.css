@@ -240,7 +240,9 @@ h6,
   box-shadow: 0 2px 8px rgba(44, 62, 80, 0.08);
   margin: 0;
   padding: 0;
-  transition: box-shadow 0.2s, background 0.2s;
+  transition:
+    box-shadow 0.2s,
+    background 0.2s;
   cursor: pointer;
 }
 .toolbar-btn img {
@@ -304,7 +306,9 @@ h6,
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.18s, box-shadow 0.18s;
+  transition:
+    background 0.18s,
+    box-shadow 0.18s;
   cursor: pointer;
   margin: 0;
   padding: 0;
@@ -460,7 +464,9 @@ h6,
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.2s, box-shadow 0.2s;
+  transition:
+    background 0.2s,
+    box-shadow 0.2s;
   cursor: pointer;
   margin: 0;
   padding: 0;
@@ -593,7 +599,9 @@ h6,
   border: 1.5px solid #e5e7eb;
   font-size: 1.1rem;
   background: #fafbfc;
-  transition: border 0.18s, background 0.18s;
+  transition:
+    border 0.18s,
+    background 0.18s;
 }
 .properties-panel input[type="text"]:focus {
   border: 1.5px solid #6366f1;
@@ -609,7 +617,9 @@ h6,
   box-shadow: 0 2px 8px rgba(44, 62, 80, 0.1);
   cursor: pointer;
   padding: 0;
-  transition: border 0.18s, box-shadow 0.18s;
+  transition:
+    border 0.18s,
+    box-shadow 0.18s;
 }
 .properties-panel input[type="color"]:hover {
   border: 2px solid #6366f1;
@@ -623,7 +633,9 @@ h6,
   font-size: 1.1rem;
   background: #fafbfc;
   text-align: center;
-  transition: border 0.18s, background 0.18s;
+  transition:
+    border 0.18s,
+    background 0.18s;
 }
 .properties-panel input[type="number"]:focus {
   border: 1.5px solid #6366f1;
@@ -648,7 +660,9 @@ h6,
   font-size: 1.2rem;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s, box-shadow 0.18s;
+  transition:
+    background 0.2s,
+    box-shadow 0.18s;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -968,7 +982,9 @@ body {
   cursor: pointer;
   padding: 0;
   margin: 0 6px 0 2px;
-  transition: border 0.18s, box-shadow 0.18s;
+  transition:
+    border 0.18s,
+    box-shadow 0.18s;
 }
 
 .properties-panel input[type="color"]:hover {
@@ -1002,7 +1018,10 @@ body {
   margin-left: 8px;
   cursor: pointer;
   filter: grayscale(0.2);
-  transition: filter 0.18s, background 0.18s, border-radius 0.18s;
+  transition:
+    filter 0.18s,
+    background 0.18s,
+    border-radius 0.18s;
   padding: 2px;
   border-radius: 50%;
 }
@@ -1035,4 +1054,90 @@ body {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Export button (top right controls) */
+.btn-export {
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 18px;
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.btn-export:hover {
+  background: #1d4ed8;
+}
+
+/* Export Dialog (docs/TASKS.md P1-8) */
+.export-dialog .modal-body {
+  display: flex;
+  gap: 20px;
+}
+
+.export-preview {
+  position: relative;
+  flex: 0 0 220px;
+  height: 220px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: repeating-conic-gradient(#f1f5f9 0% 25%, #fff 0% 50%) 50% / 16px
+    16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.export-preview img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.export-preview-empty {
+  color: #94a3b8;
+  font-size: 0.85rem;
+  text-align: center;
+  padding: 0 12px;
+}
+
+.export-options {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.export-format-group {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  gap: 16px;
+}
+
+.export-format-group legend {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+  width: 100%;
+  float: none;
+  margin-bottom: 4px;
+}
+
+.export-option-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+}
+
+.export-error {
+  color: #dc2626;
+  font-size: 0.85rem;
+  margin-right: auto;
 }

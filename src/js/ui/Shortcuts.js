@@ -20,6 +20,9 @@
  * @param {() => void} [deps.exportJson] Ctrl+S (docs/TASKS.md P1-7).
  *   Optional so tests/callers that don't need it can omit it.
  * @param {() => void} [deps.triggerImport] Ctrl+O (docs/TASKS.md P1-7).
+ * @param {() => void} [deps.openExportDialog] Ctrl+E (docs/TASKS.md P1-8):
+ *   the PNG/JPEG/PDF export dialog, as opposed to exportJson's direct
+ *   Ctrl+S download.
  * @returns {() => void} an unbind function, for tests or a future
  *   settings/help-overlay feature that needs to temporarily suspend
  *   shortcuts.
@@ -36,6 +39,7 @@ export function bindShortcuts({
   updatePropertiesPanel,
   exportJson,
   triggerImport,
+  openExportDialog,
 }) {
   function handleKeydown(e) {
     const mod = e.ctrlKey || e.metaKey;
@@ -70,6 +74,15 @@ export function bindShortcuts({
       if (key === "o") {
         e.preventDefault();
         triggerImport?.();
+        return;
+      }
+      // Ctrl/Cmd+E: the PNG/JPEG/PDF export dialog (docs/TASKS.md P1-8).
+      // Not a browser-reserved shortcut like S/O above, but prevented
+      // anyway for consistency and in case some browser/extension binds
+      // it to something else.
+      if (key === "e") {
+        e.preventDefault();
+        openExportDialog?.();
         return;
       }
     }

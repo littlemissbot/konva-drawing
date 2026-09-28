@@ -44,10 +44,10 @@ function setUpStage({ width = 800, height = 600 } = {}) {
 }
 
 describe("exportPdf", () => {
-  test("rejects an unsupported page size", () => {
+  test("rejects an unsupported page size", async () => {
     const { stage, layer, cleanup } = setUpStage();
     layer.add(new Rect({ x: 0, y: 0, width: 10, height: 10 }));
-    const result = exportPdf(stage, { pageSize: "tabloid" });
+    const result = await exportPdf(stage, { pageSize: "tabloid" });
     expect(result).toEqual({
       ok: false,
       reason: "invalid-page-size",
@@ -56,9 +56,9 @@ describe("exportPdf", () => {
     cleanup();
   });
 
-  test("reports an empty canvas rather than producing a blank page", () => {
+  test("reports an empty canvas rather than producing a blank page", async () => {
     const { stage, cleanup } = setUpStage();
-    const result = exportPdf(stage);
+    const result = await exportPdf(stage);
     expect(result).toEqual({
       ok: false,
       reason: "empty",
@@ -67,11 +67,11 @@ describe("exportPdf", () => {
     cleanup();
   });
 
-  test("produces a PDF blob and data URL for pageSize 'fit'", () => {
+  test("produces a PDF blob and data URL for pageSize 'fit'", async () => {
     const { stage, layer, cleanup } = setUpStage();
     layer.add(new Rect({ x: 0, y: 0, width: 100, height: 50, fill: "#f00" }));
 
-    const result = exportPdf(stage, { pageSize: "fit" });
+    const result = await exportPdf(stage, { pageSize: "fit" });
 
     expect(result.ok).toBe(true);
     expect(result.blob).toBeInstanceOf(Blob);
@@ -82,12 +82,15 @@ describe("exportPdf", () => {
 
   test.each(["a4", "letter"])(
     "produces a PDF for the fixed page size '%s' in both orientations",
-    (pageSize) => {
+    async (pageSize) => {
       const { stage, layer, cleanup } = setUpStage();
       layer.add(new Rect({ x: 0, y: 0, width: 100, height: 50 }));
 
-      const portrait = exportPdf(stage, { pageSize, orientation: "portrait" });
-      const landscape = exportPdf(stage, {
+      const portrait = await exportPdf(stage, {
+        pageSize,
+        orientation: "portrait",
+      });
+      const landscape = await exportPdf(stage, {
         pageSize,
         orientation: "landscape",
       });
@@ -98,30 +101,33 @@ describe("exportPdf", () => {
     }
   );
 
-  test("does not throw with Text nodes present, whether or not the selectable text layer is requested", () => {
+  test("does not throw/reject with Text nodes present, whether or not the selectable text layer is requested", async () => {
     const { stage, layer, cleanup } = setUpStage();
     layer.add(new Rect({ x: 0, y: 0, width: 200, height: 100 }));
     layer.add(new Text({ x: 10, y: 10, text: "Hello, FrameX", fontSize: 16 }));
 
-    expect(() =>
+    // .resolves (rather than a bare await) both fails the test if the
+    // promise rejects and gives jest/expect-expect a real assertion to
+    // see, instead of a rejected promise being the only signal.
+    await expect(
       exportPdf(stage, { pageSize: "fit", selectableText: true })
-    ).not.toThrow();
-    expect(() =>
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
       exportPdf(stage, { pageSize: "fit", selectableText: false })
-    ).not.toThrow();
-    expect(() =>
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
       exportPdf(stage, { pageSize: "a4", selectableText: true })
-    ).not.toThrow();
+    ).resolves.toMatchObject({ ok: true });
     cleanup();
   });
 
-  test("an invisible/off-stage Text node does not break export", () => {
+  test("an invisible/off-stage Text node does not break export", async () => {
     const { stage, layer, cleanup } = setUpStage();
     layer.add(new Rect({ x: 0, y: 0, width: 50, height: 50 }));
     const hidden = new Text({ x: 0, y: 0, text: "hidden", visible: false });
     layer.add(hidden);
 
-    expect(() => exportPdf(stage)).not.toThrow();
+    await expect(exportPdf(stage)).resolves.toMatchObject({ ok: true });
     cleanup();
   });
 });

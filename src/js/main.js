@@ -14,8 +14,22 @@ import {
   suggestedFilename,
   readDocumentFile,
 } from "./export/json.js";
+import {
+  gatherExportOptions,
+  runExport,
+  suggestedExportFilename,
+} from "./ui/ExportDialog.js";
 import { bindShortcuts } from "./ui/Shortcuts.js";
-import "bootstrap/dist/js/bootstrap.bundle.min.js";
+// The named import (not a bare `import "bootstrap/.../bootstrap.bundle.min.js"`
+// side-effect import) matters: that bundle is a UMD build whose global-
+// scope fallback resolves to `undefined` in Vite's ESM output, so
+// nothing ever attaches a usable `window.bootstrap` - the export
+// dialog's Ctrl+E path (which calls Modal.show()/hide() programmatically,
+// not just via data-bs-toggle/dismiss attributes) silently no-op'd
+// until this was caught by e2e/export-dialog.spec.js. Modal itself
+// doesn't need Popper (only Dropdown/Tooltip/Popover do), so importing
+// just Modal from bootstrap's real ESM build needs no other setup.
+import { Modal } from "bootstrap";
 import Konva from "konva";
 
 function debounce(func, wait) {
@@ -693,13 +707,176 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (file) importDocumentFromFile(file);
   });
 
+  // --- Export Dialog (docs/TASKS.md P1-8) ---
+  // Format/scale/background/selection-only options plus a live preview
+  // thumbnail, for PNG/JPEG/PDF (JSON export has no options worth a
+  // dialog over - it's the whole document, always - so Ctrl+S above
+  // stays a direct download). ui/ExportDialog.js owns the actual
+  // option-gathering and export logic (unit-tested there, the same way
+  // as export/raster.js and export/pdf.js); everything here is just
+  // wiring those functions to this page's specific DOM elements and the
+  // Bootstrap modal already used for nothing else on this page.
+  const exportModalEl = document.getElementById("exportModal");
+  const exportFormatRadios = exportModalEl.querySelectorAll(
+    'input[name="exportFormat"]'
+  );
+  const exportScaleSelect = document.getElementById("exportScale");
+  const exportTransparentCheckbox =
+    document.getElementById("exportTransparent");
+  const exportBackgroundColorInput = document.getElementById(
+    "exportBackgroundColor"
+  );
+  const exportSelectionOnlyCheckbox = document.getElementById(
+    "exportSelectionOnly"
+  );
+  const exportPageSizeSelect = document.getElementById("exportPageSize");
+  const exportOrientationSelect = document.getElementById("exportOrientation");
+  const exportSelectableTextCheckbox = document.getElementById(
+    "exportSelectableText"
+  );
+  const exportPreviewImg = document.getElementById("exportPreviewImg");
+  const exportPreviewEmpty = document.getElementById("exportPreviewEmpty");
+  const exportTransparentRow = document.getElementById("exportTransparentRow");
+  const exportBackgroundRow = document.getElementById("exportBackgroundRow");
+  const exportPdfOptions = document.getElementById("exportPdfOptions");
+  const exportOrientationRow = document.getElementById("exportOrientationRow");
+  const exportErrorEl = document.getElementById("exportError");
+  const exportConfirmBtn = document.getElementById("exportConfirmBtn");
+
+  function currentExportElements() {
+    return {
+      formatRadios: exportFormatRadios,
+      scaleSelect: exportScaleSelect,
+      transparentCheckbox: exportTransparentCheckbox,
+      backgroundColorInput: exportBackgroundColorInput,
+      selectionOnlyCheckbox: exportSelectionOnlyCheckbox,
+      pageSizeSelect: exportPageSizeSelect,
+      orientationSelect: exportOrientationSelect,
+      selectableTextCheckbox: exportSelectableTextCheckbox,
+    };
+  }
+
+  function currentExportFormat() {
+    return [...exportFormatRadios].find((r) => r.checked)?.value || "png";
+  }
+
+  // Shows/hides each option group for the currently chosen format - a
+  // transparency toggle means nothing for JPEG/PDF (raster.js/pdf.js
+  // both always give JPEG a white background, and a PDF page is always
+  // opaque), and PDF's own page-size/orientation/selectable-text
+  // options mean nothing for a plain raster image.
+  function updateExportOptionVisibility() {
+    const format = currentExportFormat();
+    const isPdf = format === "pdf";
+    const isPng = format === "png";
+    exportPdfOptions.style.display = isPdf ? "block" : "none";
+    // A "fit to content" PDF page picks its own orientation from the
+    // content's own aspect ratio (see export/pdf.js) - orientation only
+    // means something for the fixed page sizes.
+    exportOrientationRow.style.display =
+      isPdf && exportPageSizeSelect.value !== "fit" ? "flex" : "none";
+    exportTransparentRow.style.display = isPng ? "flex" : "none";
+    exportBackgroundRow.style.display =
+      !isPng || !exportTransparentCheckbox.checked ? "flex" : "none";
+    // Exporting just the selected shape only makes sense when one is
+    // actually selected (and Phase 1 has no multi-select yet, P2-1).
+    const hasSelection = !!canvasManager.selectedShape;
+    exportSelectionOnlyCheckbox.disabled = !hasSelection;
+    if (!hasSelection) exportSelectionOnlyCheckbox.checked = false;
+  }
+
+  async function updateExportPreview() {
+    const options = gatherExportOptions(currentExportElements());
+    // Always a fast, low-resolution PNG for the preview, regardless of
+    // the chosen format/scale: even a PDF's own preview is just the
+    // same raster image it will embed (see export/pdf.js), and
+    // re-rendering at full export resolution on every option change
+    // would make the dialog feel sluggish for no visible benefit at
+    // thumbnail size. This also means the preview never touches
+    // exportPdf/jsPDF at all - only actually confirming a PDF export
+    // below does, keeping jsPDF's ~340KB chunk (docs/TASKS.md P1-8's
+    // bundle-size fix) out of the common "just look at the preview"
+    // path too.
+    const result = await runExport({
+      stage,
+      canvasManager,
+      options: {
+        ...options,
+        format: "png",
+        pixelRatio: 1,
+      },
+    });
+    if (result.ok) {
+      exportPreviewImg.src = result.dataUrl;
+      exportPreviewImg.style.display = "block";
+      exportPreviewEmpty.style.display = "none";
+    } else {
+      exportPreviewImg.style.display = "none";
+      exportPreviewEmpty.textContent =
+        result.reason === "empty" ? "Nothing to export" : result.message;
+      exportPreviewEmpty.style.display = "flex";
+    }
+  }
+
+  const debouncedUpdateExportPreview = debounce(updateExportPreview, 200);
+
+  function refreshExportDialog() {
+    updateExportOptionVisibility();
+    debouncedUpdateExportPreview();
+  }
+
+  exportModalEl.addEventListener("show.bs.modal", () => {
+    exportErrorEl.textContent = "";
+    refreshExportDialog();
+  });
+  exportModalEl.querySelectorAll("input, select").forEach((el) => {
+    el.addEventListener("change", refreshExportDialog);
+  });
+
+  exportConfirmBtn.addEventListener("click", async () => {
+    exportErrorEl.textContent = "";
+    const options = gatherExportOptions(currentExportElements());
+    // A PDF export's first jsPDF dynamic import (export/pdf.js) can take
+    // a perceptible moment - disable the button so a second click can't
+    // start an overlapping export while the first is still in flight.
+    exportConfirmBtn.disabled = true;
+    const previousLabel = exportConfirmBtn.textContent;
+    exportConfirmBtn.textContent = "Exporting...";
+    let result;
+    try {
+      result = await runExport({ stage, canvasManager, options });
+    } finally {
+      exportConfirmBtn.disabled = false;
+      exportConfirmBtn.textContent = previousLabel;
+    }
+    if (!result.ok) {
+      exportErrorEl.textContent = result.message;
+      return;
+    }
+    // A data: URL works directly as a download link's href - no need
+    // to also round-trip it through a Blob/ObjectURL the way
+    // exportJson() does above (that one starts from a document object,
+    // not a data URL already in hand).
+    const link = document.createElement("a");
+    link.href = result.dataUrl;
+    link.download = suggestedExportFilename(currentDocument, options.format);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    Modal.getOrCreateInstance(exportModalEl).hide();
+  });
+
+  function openExportDialog() {
+    Modal.getOrCreateInstance(exportModalEl).show();
+  }
+
   // All global keyboard shortcuts (undo/redo, zoom, delete, escape,
-  // JSON export/import) live in ui/Shortcuts.js, not inline here - see
-  // that file for behavior and comments. updatePropertiesPanel is a
-  // hoisted function declaration defined further down in this same
-  // scope; passing it here is safe regardless of source order since
-  // this call only runs once the whole DOMContentLoaded handler's
-  // declarations have all been hoisted.
+  // JSON export/import, the export dialog) live in ui/Shortcuts.js, not
+  // inline here - see that file for behavior and comments.
+  // updatePropertiesPanel is a hoisted function declaration defined
+  // further down in this same scope; passing it here is safe regardless
+  // of source order since this call only runs once the whole
+  // DOMContentLoaded handler's declarations have all been hoisted.
   bindShortcuts({
     historyManager,
     canvasManager,
@@ -712,6 +889,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     updatePropertiesPanel,
     exportJson,
     triggerImport,
+    openExportDialog,
   });
 
   // Button event listeners
