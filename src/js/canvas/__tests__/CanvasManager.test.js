@@ -150,7 +150,6 @@ describe("CanvasManager Image URL resolution (spy-based, no real network needed)
     };
 
     canvasManager.reconstructShapes([
-      { type: "Image", attrs: { x: 0, y: 0, width: 10, height: 10, iconFile: "003-conveyor.svg" } },
       {
         type: "Image",
         attrs: {
@@ -158,7 +157,18 @@ describe("CanvasManager Image URL resolution (spy-based, no real network needed)
           y: 0,
           width: 10,
           height: 10,
-          svgUrl: "https://old-domain.example.com/assets/svgs/010-building-crane.svg",
+          iconFile: "003-conveyor.svg",
+        },
+      },
+      {
+        type: "Image",
+        attrs: {
+          x: 0,
+          y: 0,
+          width: 10,
+          height: 10,
+          svgUrl:
+            "https://old-domain.example.com/assets/svgs/010-building-crane.svg",
         },
       },
     ]);

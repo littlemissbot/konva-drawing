@@ -9,9 +9,7 @@ test.describe("save / load persistence", () => {
   // Regression coverage for docs/TASKS.md P0-2: three overlapping load
   // paths used to run on every page load, reconstructing saved shapes
   // twice.
-  test("a saved drawing loads exactly once, not doubled", async ({
-    page,
-  }) => {
+  test("a saved drawing loads exactly once, not doubled", async ({ page }) => {
     await page.goto("/canvas.html");
     await page.evaluate(() => {
       localStorage.setItem(
@@ -20,18 +18,35 @@ test.describe("save / load persistence", () => {
           shapes: [
             {
               type: "Circle",
-              attrs: { x: 100, y: 100, radius: 25, fill: "#fff", stroke: "#000", strokeWidth: 2, name: "Circle 1" },
+              attrs: {
+                x: 100,
+                y: 100,
+                radius: 25,
+                fill: "#fff",
+                stroke: "#000",
+                strokeWidth: 2,
+                name: "Circle 1",
+              },
             },
             {
               type: "Rect",
-              attrs: { x: 200, y: 200, width: 50, height: 50, fill: "#fff", stroke: "#000", strokeWidth: 2, name: "Rect 1" },
+              attrs: {
+                x: 200,
+                y: 200,
+                width: 50,
+                height: 50,
+                fill: "#fff",
+                stroke: "#000",
+                strokeWidth: 2,
+                name: "Rect 1",
+              },
             },
           ],
         })
       );
     });
     await page.reload();
-    await page.waitForSelector("#container canvas");
+    await expect(page.locator("#container canvas").first()).toBeVisible();
 
     await expect(page.locator(".save-status-text")).toHaveText(
       "Canvas restored"
@@ -52,7 +67,7 @@ test.describe("save / load persistence", () => {
     await page.goto("/canvas.html");
     await page.evaluate(() => localStorage.clear());
     await page.reload();
-    await page.waitForSelector("#container canvas");
+    await expect(page.locator("#container canvas").first()).toBeVisible();
 
     await expect(page.locator(".save-status-text")).toHaveText(
       "No saved canvas found"
@@ -98,7 +113,7 @@ test.describe("save / load persistence", () => {
     expect(saved).toContain('"iconFile":"007-excavator.svg"');
 
     await page.reload();
-    await page.waitForSelector("#container canvas");
+    await expect(page.locator("#container canvas").first()).toBeVisible();
     const afterReload = await page.evaluate(() => {
       const img = window.canvasManager.shapes.find(
         (s) => s.getClassName() === "Image"
@@ -138,7 +153,7 @@ test.describe("save / load persistence", () => {
       );
     });
     await page.reload();
-    await page.waitForSelector("#container canvas");
+    await expect(page.locator("#container canvas").first()).toBeVisible();
 
     await expect
       .poll(() => page.evaluate(() => window.canvasManager.shapes.length))
@@ -156,7 +171,9 @@ test.describe("save / load persistence", () => {
     const pageErrors = [];
     page.on("pageerror", (e) => pageErrors.push(e.message));
     await page.goto("/canvas.html");
-    await page.evaluate(() => window.svgManager.createSVG("001-manufacture.svg"));
+    await page.evaluate(() =>
+      window.svgManager.createSVG("001-manufacture.svg")
+    );
     await expect
       .poll(() => page.evaluate(() => window.canvasManager.shapes.length))
       .toBe(1);

@@ -4,7 +4,6 @@ import { Rect } from "konva/lib/shapes/Rect";
 import { Line } from "konva/lib/shapes/Line";
 import { RegularPolygon } from "konva/lib/shapes/RegularPolygon";
 import { Star } from "konva/lib/shapes/Star";
-import { Image } from "konva/lib/shapes/Image";
 import { Group } from "konva/lib/Group";
 import Konva from "konva";
 
@@ -284,14 +283,33 @@ export class CanvasManager {
     });
   }
 
+  // The single, canonical event wiring for every shape type (basic
+  // shapes, freehand strokes, sticky notes, SVG icons all funnel through
+  // here - see ShapeManager, ToolManager and SVGManager). Do not
+  // maintain a second copy of this elsewhere: a duplicated copy in
+  // ShapeManager (removed in docs/TASKS.md P0-10) was missing the
+  // dragend -> "shapeDragEnded" emission below, so dragging any basic
+  // shape (circle, rect, square, triangle, star, line - i.e. anything
+  // created from the shapes menu) never committed a history checkpoint
+  // for its new position; pressing Ctrl+Z after such a drag undid the
+  // shape's *creation* instead of just its move, deleting it outright.
   setupShapeEvents(shape, name) {
     shape.on("click", () => {
       window.eventBus.emit("shapeSelected", shape);
     });
 
+    shape.on("mouseover", () => {
+      this.updateTooltip(name, shape.x(), shape.y());
+    });
+
+    shape.on("mouseout", () => {
+      this.hideTooltip();
+    });
+
     shape.on("dragmove", () => {
       this.mainLayer.batchDraw();
       this.updateConnections();
+      this.hideTooltip();
     });
 
     shape.on("dragend", () => {

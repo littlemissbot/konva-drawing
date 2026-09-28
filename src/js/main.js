@@ -1,7 +1,6 @@
 import { Stage } from "konva/lib/Stage";
 import { Layer } from "konva/lib/Layer";
 import { ShapeManager } from "./canvas/ShapeManager.js";
-import { PropertyManager } from "./ui/PropertyManager.js";
 import { SVGManager } from "./canvas/SVGManager.js";
 import { CanvasManager } from "./canvas/CanvasManager.js";
 import { TextManager } from "./canvas/TextManager.js";
@@ -137,7 +136,12 @@ window.addEventListener("DOMContentLoaded", () => {
   };
 
   const shapeManager = new ShapeManager(canvasManager);
-  const propertyManager = new PropertyManager(canvasManager);
+  // PropertyManager is not instantiated: nothing in this app calls it
+  // today (its updateForm() references a #textContent input this page
+  // doesn't have, and the properties panel below is driven entirely by
+  // this file's own inline updatePropertiesPanel() instead). See
+  // src/js/ui/PropertyManager.js and docs/TASKS.md P3-5, which plans to
+  // rebuild the properties panel as its single source of truth.
   const svgManager = new SVGManager(canvasManager);
   const textManager = new TextManager(canvasManager);
   canvasManager.setTextManager(textManager);
@@ -512,10 +516,6 @@ window.addEventListener("DOMContentLoaded", () => {
 
     if (newScale !== zoomLevel) {
       zoomLevel = newScale;
-
-      // Calculate the center point of the content
-      const centerX = (minX + maxX) / 2;
-      const centerY = (minY + maxY) / 2;
 
       // Calculate the new position to center the content
       const newPos = {

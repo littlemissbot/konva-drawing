@@ -10,7 +10,7 @@ test.describe("text editing overlay", () => {
   test.beforeEach(async ({ page }) => {
     await blockExternal(page);
     await page.goto("/canvas.html");
-    await page.waitForSelector("#container canvas");
+    await expect(page.locator("#container canvas").first()).toBeVisible();
   });
 
   test("editor position, width and font size match the text node at 100% zoom", async ({
@@ -34,12 +34,19 @@ test.describe("text editing overlay", () => {
       };
     });
 
-    await page.evaluate(() => window.textManager.startEditing(window.__textNode));
+    await page.evaluate(() =>
+      window.textManager.startEditing(window.__textNode)
+    );
     const actual = await page.evaluate(() => {
       const ta = document.querySelector("textarea");
       const r = ta.getBoundingClientRect();
       const cs = getComputedStyle(ta);
-      return { left: r.left, top: r.top, width: r.width, fontSize: parseFloat(cs.fontSize) };
+      return {
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        fontSize: parseFloat(cs.fontSize),
+      };
     });
 
     expect(Math.abs(actual.left - expected.screenX)).toBeLessThan(2);
@@ -81,12 +88,19 @@ test.describe("text editing overlay", () => {
       };
     });
 
-    await page.evaluate(() => window.textManager.startEditing(window.__textNode));
+    await page.evaluate(() =>
+      window.textManager.startEditing(window.__textNode)
+    );
     const actual = await page.evaluate(() => {
       const ta = document.querySelector("textarea");
       const r = ta.getBoundingClientRect();
       const cs = getComputedStyle(ta);
-      return { left: r.left, top: r.top, width: r.width, fontSize: parseFloat(cs.fontSize) };
+      return {
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        fontSize: parseFloat(cs.fontSize),
+      };
     });
 
     expect(Math.abs(actual.left - expected.screenX)).toBeLessThan(2);
