@@ -1,4 +1,5 @@
 import { Text } from "konva/lib/shapes/Text";
+import { createId } from "../core/Document.js";
 
 export class TextManager {
   constructor(canvasManager) {
@@ -25,6 +26,7 @@ export class TextManager {
       width: 200,
       padding: 5,
       name,
+      id: createId(),
     });
 
     this.setupTextEvents(text);

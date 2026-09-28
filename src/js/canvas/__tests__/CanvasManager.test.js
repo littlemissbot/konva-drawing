@@ -3,8 +3,14 @@ import { Layer } from "konva/lib/Layer";
 import { Circle } from "konva/lib/shapes/Circle";
 import { Rect } from "konva/lib/shapes/Rect";
 import { Image as KonvaImage } from "konva/lib/shapes/Image";
+import { Group } from "konva/lib/Group";
 import { CanvasManager } from "../CanvasManager.js";
 import { EventBus } from "../../core/EventBus.js";
+import {
+  createId,
+  createEmptyDocument,
+  validateDocument,
+} from "../../core/Document.js";
 
 /**
  * These run against real Konva Stage/Layer/shape instances (jest-canvas-mock
@@ -181,5 +187,133 @@ describe("CanvasManager Image URL resolution (spy-based, no real network needed)
     KonvaImage.fromURL = originalFromURL;
     stage.destroy();
     container.remove();
+  });
+});
+
+// docs/TASKS.md P1-1: the bridge between live Konva shapes and
+// core/Document.js's v2 schema.
+describe("CanvasManager <-> core/Document.js bridge", () => {
+  let container, stage, mainLayer, canvasManager;
+
+  beforeEach(() => {
+    window.eventBus = new EventBus();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    stage = new Stage({ container, width: 800, height: 600 });
+    mainLayer = new Layer();
+    stage.add(mainLayer);
+    canvasManager = new CanvasManager(stage, mainLayer, new Layer());
+  });
+
+  afterEach(() => {
+    stage.destroy();
+    container.remove();
+  });
+
+  test("toDocumentObjects assigns zIndex from array/stacking order and carries each shape's own id", () => {
+    const a = new Circle({ x: 1, y: 1, radius: 5, id: createId(), name: "A" });
+    const b = new Rect({
+      x: 2,
+      y: 2,
+      width: 5,
+      height: 5,
+      id: createId(),
+      name: "B",
+    });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+
+    const objects = canvasManager.toDocumentObjects();
+    expect(objects).toHaveLength(2);
+    expect(objects[0]).toMatchObject({ id: a.id(), type: "Circle", zIndex: 0 });
+    expect(objects[1]).toMatchObject({ id: b.id(), type: "Rect", zIndex: 1 });
+    expect(objects[0].id).not.toBe(objects[1].id);
+  });
+
+  test("toDocumentObjects produces a document that validates against core/Document.js's schema", () => {
+    canvasManager.addShape(
+      new Circle({ x: 1, y: 1, radius: 5, id: createId() })
+    );
+    canvasManager.addShape(
+      new Rect({ x: 2, y: 2, width: 5, height: 5, id: createId() })
+    );
+
+    const doc = createEmptyDocument();
+    doc.objects = canvasManager.toDocumentObjects();
+
+    expect(validateDocument(doc)).toEqual({ valid: true, errors: [] });
+  });
+
+  test("loadDocumentObjects sorts by zIndex, independent of input array order", () => {
+    canvasManager.loadDocumentObjects([
+      {
+        id: "obj_b",
+        type: "Rect",
+        zIndex: 1,
+        attrs: { x: 20, y: 20, width: 5, height: 5, id: "obj_b", name: "B" },
+      },
+      {
+        id: "obj_a",
+        type: "Circle",
+        zIndex: 0,
+        attrs: { x: 10, y: 10, radius: 5, id: "obj_a", name: "A" },
+      },
+    ]);
+
+    // Given out of zIndex order in the input, still reconstructed in
+    // zIndex order (Konva stacking order follows add() call order).
+    expect(canvasManager.shapes.map((s) => s.getAttr("name"))).toEqual([
+      "A",
+      "B",
+    ]);
+  });
+
+  test("a full toDocumentObjects -> JSON -> loadDocumentObjects round-trip preserves ids, types and geometry", () => {
+    const original = [
+      new Circle({ x: 15, y: 25, radius: 8, id: createId(), name: "Circle 1" }),
+      new Rect({
+        x: 30,
+        y: 40,
+        width: 12,
+        height: 6,
+        id: createId(),
+        name: "Rect 1",
+      }),
+    ];
+    original.forEach((s) => canvasManager.addShape(s));
+    const originalIds = original.map((s) => s.id());
+
+    const json = JSON.stringify(canvasManager.toDocumentObjects());
+    canvasManager.clearCanvas();
+    expect(canvasManager.shapes).toHaveLength(0);
+
+    canvasManager.loadDocumentObjects(JSON.parse(json));
+
+    expect(canvasManager.shapes).toHaveLength(2);
+    expect(canvasManager.shapes.map((s) => s.id())).toEqual(originalIds);
+    const rebuiltCircle = canvasManager.shapes.find(
+      (s) => s.getClassName() === "Circle"
+    );
+    expect(rebuiltCircle.x()).toBe(15);
+    expect(rebuiltCircle.y()).toBe(25);
+    expect(rebuiltCircle.radius()).toBe(8);
+  });
+
+  test("StickyNote and Image objects also get a real id, not just basic shapes", () => {
+    const group = new Group({
+      x: 0,
+      y: 0,
+      toolType: "sticky",
+      id: createId(),
+      name: "Note 1",
+    });
+    const rect = new Rect({ width: 200, height: 140 });
+    group.add(rect);
+    canvasManager.addShape(group);
+
+    const [obj] = canvasManager.toDocumentObjects();
+    expect(obj.type).toBe("StickyNote");
+    expect(obj.id).toBe(group.id());
+    expect(obj.id).toBeTruthy();
   });
 });

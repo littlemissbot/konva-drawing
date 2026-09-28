@@ -6,6 +6,7 @@ import { RegularPolygon } from "konva/lib/shapes/RegularPolygon";
 import { Star } from "konva/lib/shapes/Star";
 import { Group } from "konva/lib/Group";
 import Konva from "konva";
+import { createId } from "../core/Document.js";
 
 export class CanvasManager {
   constructor(stage, mainLayer, tooltipLayer) {
@@ -39,6 +40,7 @@ export class CanvasManager {
       return {
         type: "StickyNote",
         attrs: {
+          id: shape.id(),
           x: shape.x(),
           y: shape.y(),
           rotation: shape.rotation(),
@@ -68,6 +70,7 @@ export class CanvasManager {
       return {
         type,
         attrs: {
+          id: shape.id(),
           x: shape.x(),
           y: shape.y(),
           width: shape.width(),
@@ -143,21 +146,36 @@ export class CanvasManager {
     }
   }
 
-  saveCanvas() {
-    const data = {
-      shapes: this.shapes.map((shape) => this.toStorageShape(shape)),
-    };
-    localStorage.setItem("canvasData", JSON.stringify(data));
+  // Bridge to the core/Document.js v2 schema (docs/TASKS.md P1-1). Kept
+  // here rather than in Document.js itself, which is deliberately
+  // Konva-agnostic: this is the one place that knows how to walk live
+  // Konva nodes, and it reuses toStorageShape/reconstructShapes (already
+  // covered by their own tests) rather than duplicating their per-type
+  // logic. zIndex comes from array position, the same source of truth
+  // addShape has always used for stacking order.
+  toDocumentObjects() {
+    return this.shapes.map((shape, index) => {
+      const stored = this.toStorageShape(shape);
+      return {
+        id: stored.attrs.id || shape.id() || createId("obj"),
+        type: stored.type,
+        zIndex: index,
+        attrs: stored.attrs,
+      };
+    });
   }
 
-  loadCanvas() {
-    const data = JSON.parse(localStorage.getItem("canvasData"));
-    if (data && data.shapes) {
-      this.clearCanvas();
-      this.reconstructShapes(data.shapes);
-      this.toolManager?.refreshInteractivity();
-      this.mainLayer.batchDraw();
-    }
+  // Accepts document.objects (docs/TASKS.md P1-1's schema: unordered is
+  // fine, each carries its own zIndex) rather than requiring the caller
+  // to have already sorted them.
+  loadDocumentObjects(objects) {
+    const sorted = [...objects].sort((a, b) => a.zIndex - b.zIndex);
+    this.reconstructShapes(
+      sorted.map((obj) => ({
+        type: obj.type,
+        attrs: { ...obj.attrs, id: obj.attrs.id || obj.id },
+      }))
+    );
   }
 
   reconstructShapes(shapes) {
@@ -196,6 +214,7 @@ export class CanvasManager {
           const rectAttrs = attrs.rect || {};
           const textAttrs = attrs.text || {};
           const group = new Group({
+            id: attrs.id || createId(),
             x: attrs.x ?? 0,
             y: attrs.y ?? 0,
             rotation: attrs.rotation ?? 0,
@@ -248,6 +267,7 @@ export class CanvasManager {
             url,
             (image) => {
               image.setAttrs({
+                id: attrs.id || createId(),
                 x: attrs.x,
                 y: attrs.y,
                 width: attrs.width,

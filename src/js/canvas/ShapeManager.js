@@ -3,6 +3,7 @@ import { Rect } from "konva/lib/shapes/Rect";
 import { Line } from "konva/lib/shapes/Line";
 import { RegularPolygon } from "konva/lib/shapes/RegularPolygon";
 import { Star } from "konva/lib/shapes/Star";
+import { createId } from "../core/Document.js";
 
 export class ShapeManager {
   constructor(canvasManager) {
@@ -35,6 +36,7 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
     this.canvasManager.setupShapeEvents(circle, "Circle");
@@ -54,6 +56,7 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
     this.canvasManager.setupShapeEvents(rect, "Rectangle");
@@ -73,6 +76,7 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
     this.canvasManager.setupShapeEvents(square, "Square");
@@ -92,6 +96,7 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
     this.canvasManager.setupShapeEvents(triangle, "Triangle");
@@ -112,6 +117,7 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
     this.canvasManager.setupShapeEvents(line, "Line");
@@ -132,6 +138,7 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
     this.canvasManager.setupShapeEvents(star, "Star");
