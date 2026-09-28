@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "bootstrap": "^5.3.2",
+    "jspdf": "^4.2.1",
     "konva": "^9.3.0"
   },
   "devDependencies": {

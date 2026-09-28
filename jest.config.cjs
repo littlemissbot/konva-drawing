@@ -17,5 +17,13 @@ module.exports = {
   // specifier is ambiguous.
   moduleNameMapper: {
     "^konva$": "<rootDir>/node_modules/konva/lib/index.js",
+    // jsPDF's package.json points the "browser"/"default" export
+    // condition (which Jest's jsdom test environment resolves through)
+    // at an ES module build, which Jest's default CommonJS transform
+    // can't parse ("Cannot use import statement outside a module") -
+    // the same class of resolution mismatch as konva above. Vite
+    // bundles the app against that same ESM build correctly; only Jest
+    // needs redirecting, to jsPDF's own separately-published CJS build.
+    "^jspdf$": "<rootDir>/node_modules/jspdf/dist/jspdf.node.min.js",
   },
 };

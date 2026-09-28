@@ -20,3 +20,17 @@ require("jest-canvas-mock");
 if (typeof global.structuredClone === "undefined") {
   global.structuredClone = (value) => JSON.parse(JSON.stringify(value));
 }
+
+// jsPDF (used to test export/pdf.js, docs/TASKS.md P1-6) pulls in
+// fast-png/iobuffer, which need TextEncoder/TextDecoder - also missing
+// from jsdom's simulated global scope. Unlike structuredClone above,
+// these don't need a shim: Node's own real implementations are
+// reachable via require("util") (a CommonJS require, unlike a bare
+// global reference, still resolves through to the outer Node process
+// regardless of jsdom replacing the global scope), so the real thing is
+// used rather than approximating one.
+if (typeof global.TextEncoder === "undefined") {
+  const { TextEncoder, TextDecoder } = require("util");
+  global.TextEncoder = TextEncoder;
+  global.TextDecoder = TextDecoder;
+}
