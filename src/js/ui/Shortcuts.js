@@ -17,6 +17,9 @@
  * @param {() => void} deps.zoomOut
  * @param {() => void} deps.resetZoom
  * @param {(shape: unknown) => void} deps.updatePropertiesPanel
+ * @param {() => void} [deps.exportJson] Ctrl+S (docs/TASKS.md P1-7).
+ *   Optional so tests/callers that don't need it can omit it.
+ * @param {() => void} [deps.triggerImport] Ctrl+O (docs/TASKS.md P1-7).
  * @returns {() => void} an unbind function, for tests or a future
  *   settings/help-overlay feature that needs to temporarily suspend
  *   shortcuts.
@@ -31,6 +34,8 @@ export function bindShortcuts({
   zoomOut,
   resetZoom,
   updatePropertiesPanel,
+  exportJson,
+  triggerImport,
 }) {
   function handleKeydown(e) {
     const mod = e.ctrlKey || e.metaKey;
@@ -49,6 +54,22 @@ export function bindShortcuts({
       if (key === "y" || (key === "z" && e.shiftKey)) {
         e.preventDefault();
         historyManager.redo();
+        return;
+      }
+      // Ctrl/Cmd+S: JSON export. Always prevented (even without a
+      // handler) so the browser's own "Save Page As" dialog never
+      // fires here - that would save the app's HTML shell, not the
+      // drawing, which is never what a user pressing Ctrl+S wants.
+      if (key === "s") {
+        e.preventDefault();
+        exportJson?.();
+        return;
+      }
+      // Ctrl/Cmd+O: JSON import. Same reasoning - the browser's native
+      // "Open File" dialog is never useful on this page.
+      if (key === "o") {
+        e.preventDefault();
+        triggerImport?.();
         return;
       }
     }

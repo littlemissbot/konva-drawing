@@ -316,4 +316,89 @@ describe("CanvasManager <-> core/Document.js bridge", () => {
     expect(obj.id).toBe(group.id());
     expect(obj.id).toBeTruthy();
   });
+
+  // docs/TASKS.md P1-7: JSON import's "merge" mode, as opposed to
+  // loadDocumentObjects' full replace.
+  describe("mergeDocumentObjects", () => {
+    test("adds the incoming objects after what's already on the canvas, without removing it", () => {
+      canvasManager.addShape(
+        new Circle({ x: 1, y: 1, radius: 5, id: createId(), name: "Existing" })
+      );
+
+      canvasManager.mergeDocumentObjects([
+        {
+          id: "obj_incoming",
+          type: "Rect",
+          zIndex: 0,
+          attrs: {
+            x: 9,
+            y: 9,
+            width: 5,
+            height: 5,
+            id: "obj_incoming",
+            name: "Incoming",
+          },
+        },
+      ]);
+
+      expect(canvasManager.shapes.map((s) => s.getAttr("name"))).toEqual([
+        "Existing",
+        "Incoming",
+      ]);
+    });
+
+    test("mints a fresh id for an incoming object whose id collides with one already on the canvas", () => {
+      const existing = new Circle({
+        x: 1,
+        y: 1,
+        radius: 5,
+        id: "dup",
+        name: "Existing",
+      });
+      canvasManager.addShape(existing);
+
+      canvasManager.mergeDocumentObjects([
+        {
+          id: "dup",
+          type: "Rect",
+          zIndex: 0,
+          attrs: {
+            x: 9,
+            y: 9,
+            width: 5,
+            height: 5,
+            id: "dup",
+            name: "Incoming",
+          },
+        },
+      ]);
+
+      expect(canvasManager.shapes).toHaveLength(2);
+      const [, incoming] = canvasManager.shapes;
+      expect(incoming.id()).not.toBe("dup");
+      expect(incoming.id()).toBeTruthy();
+    });
+
+    test("preserves the incoming objects' own relative zIndex order regardless of input array order", () => {
+      canvasManager.mergeDocumentObjects([
+        {
+          id: "obj_b",
+          type: "Rect",
+          zIndex: 1,
+          attrs: { x: 20, y: 20, width: 5, height: 5, id: "obj_b", name: "B" },
+        },
+        {
+          id: "obj_a",
+          type: "Circle",
+          zIndex: 0,
+          attrs: { x: 10, y: 10, radius: 5, id: "obj_a", name: "A" },
+        },
+      ]);
+
+      expect(canvasManager.shapes.map((s) => s.getAttr("name"))).toEqual([
+        "A",
+        "B",
+      ]);
+    });
+  });
 });

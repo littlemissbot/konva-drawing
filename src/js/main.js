@@ -9,6 +9,11 @@ import { HistoryManager } from "./core/HistoryManager.js";
 import { EventBus } from "./core/EventBus.js";
 import { Persistence } from "./core/Persistence.js";
 import { createEmptyDocument } from "./core/Document.js";
+import {
+  exportJsonBlob,
+  suggestedFilename,
+  readDocumentFile,
+} from "./export/json.js";
 import { bindShortcuts } from "./ui/Shortcuts.js";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import Konva from "konva";
@@ -264,6 +269,25 @@ window.addEventListener("DOMContentLoaded", async () => {
   // rather than minting a new id on every save.
   let currentDocument = createEmptyDocument();
 
+  // Guards a narrow startup race: loadSavedCanvas() below does its own
+  // async persistence.load() and only applies the result once that
+  // resolves, but every other listener in this handler (Clear Canvas,
+  // Ctrl+O/drag-and-drop import, ...) is already bound by the time that
+  // await is reached, and control returns to the browser's event loop
+  // right at that await - so a fast enough action (an e2e test's
+  // synthetic drop event landed here in practice; a real user doing
+  // this within single-digit milliseconds of page load is far less
+  // likely but not impossible) can run before the initial load
+  // resolves. Without this guard, the load would then silently
+  // overwrite whatever that action just did with the (possibly stale,
+  // possibly nonexistent) saved document - exactly the kind of data
+  // loss this whole phase (docs/PRD.md Phase 1) exists to prevent. Only
+  // set by actions that replace the *entire* canvas (Clear, import);
+  // an incremental edit racing this same narrow window is not worth
+  // the same protection - the load would just clobber that one change,
+  // not the whole document, and self-heals on the next commit().
+  let canvasReplacedBeforeInitialLoad = false;
+
   function buildCurrentDocument() {
     return {
       ...currentDocument,
@@ -346,6 +370,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         "Clear the entire canvas? You can use Undo (Ctrl+Z) to restore this version."
       )
     ) {
+      canvasReplacedBeforeInitialLoad = true;
       historyManager.commit();
       canvasManager.clearCanvas();
       await persistence.clear();
@@ -554,12 +579,127 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // All global keyboard shortcuts (undo/redo, zoom, delete, escape) live
-  // in ui/Shortcuts.js, not inline here - see that file for behavior and
-  // comments. updatePropertiesPanel is a hoisted function declaration
-  // defined further down in this same scope; passing it here is safe
-  // regardless of source order since this call only runs once the whole
-  // DOMContentLoaded handler's declarations have all been hoisted.
+  // --- JSON export / import (docs/TASKS.md P1-7) ---
+  // A drawing needs to be able to leave the browser entirely, not just
+  // survive a reload via Persistence - backed up, shared, moved to
+  // another machine - and come back in exactly as saved. Export
+  // downloads the same v2 document Persistence would save; import
+  // reads one back via export/json.js's readDocumentFile
+  // (parseDocument under the hood), so a legacy v1 save imports and
+  // migrates exactly like an old localStorage save does. Only Ctrl+S/
+  // Ctrl+O and drag-and-drop per docs/TASKS.md P1-7's own scope - a
+  // toolbar entry point is P1-8's export dialog, not duplicated here.
+  function exportJson() {
+    const doc = buildCurrentDocument();
+    const blob = exportJsonBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = suggestedFilename(doc);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const importFileInput = document.createElement("input");
+  importFileInput.type = "file";
+  importFileInput.accept = ".json,application/json";
+  importFileInput.style.display = "none";
+  document.body.appendChild(importFileInput);
+
+  function triggerImport() {
+    // Reset first: selecting the same file twice in a row (e.g. after
+    // fixing it and re-exporting under the same name) wouldn't fire
+    // "change" a second time otherwise, since the input's value
+    // wouldn't actually change.
+    importFileInput.value = "";
+    importFileInput.click();
+  }
+
+  async function importDocumentFromFile(file) {
+    let imported;
+    try {
+      imported = await readDocumentFile(file);
+    } catch (e) {
+      console.error("Failed to import drawing:", e);
+      alert(
+        `Could not import "${file.name}": ` +
+          (e.message || "the file is not a valid FrameX drawing.")
+      );
+      return;
+    }
+
+    // Nothing to choose between if the canvas is already empty -
+    // replace and merge would do the same thing, so skip the prompt.
+    const hasExistingContent = canvasManager.shapes.length > 0;
+    const replace =
+      !hasExistingContent ||
+      confirm(
+        `Import "${file.name}"?\n\n` +
+          "Click OK to replace everything currently on the canvas, or " +
+          "Cancel to merge the imported shapes into what's already there."
+      );
+
+    canvasReplacedBeforeInitialLoad = true;
+    // Same before/after commit() pairing as the Clear Canvas handler
+    // below: the first captures whatever was on the canvas right
+    // before the import as its own undo checkpoint, the second makes
+    // the just-imported state the new one, so a single Ctrl+Z after an
+    // import goes back to exactly the pre-import canvas.
+    historyManager.commit();
+    if (replace) {
+      canvasManager.clearCanvas();
+      canvasManager.loadDocumentObjects(imported.document.objects);
+      // Adopt the imported file's own identity (id/name/timestamps) -
+      // this document IS now what's on the canvas, the same as loading
+      // a saved drawing on startup. A merge, below, keeps the current
+      // document's identity instead: it's still fundamentally the same
+      // drawing, just with more objects added to it.
+      currentDocument = imported.document;
+    } else {
+      canvasManager.mergeDocumentObjects(imported.document.objects);
+    }
+    canvasManager.toolManager?.refreshInteractivity();
+    canvasManager.deselectShape();
+    transformer.nodes([]);
+    mainLayer.batchDraw();
+    updateAddFirstObjectCard();
+    updatePropertiesPanel(null);
+    historyManager.commit();
+    // Immediate, not debounced: this is one deliberate action, not a
+    // stream of edits, and the user shouldn't lose it to a closed tab
+    // in the next 2-10s the way an in-progress drag's autosave might.
+    await persistence.saveNow(buildCurrentDocument());
+    showSaveStatus(replace ? "Canvas imported" : "Canvas merged");
+  }
+
+  importFileInput.addEventListener("change", () => {
+    const file = importFileInput.files?.[0];
+    if (file) importDocumentFromFile(file);
+  });
+
+  // Drag-and-drop a .json file anywhere onto the canvas to import it,
+  // with the same replace/merge choice as Ctrl+O. Both dragover and
+  // drop must call preventDefault(): without it the browser's default
+  // behavior is to navigate away and open the dropped file directly,
+  // discarding the whole app.
+  container.addEventListener("dragover", (e) => {
+    e.preventDefault();
+  });
+  container.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer?.files?.[0];
+    if (file) importDocumentFromFile(file);
+  });
+
+  // All global keyboard shortcuts (undo/redo, zoom, delete, escape,
+  // JSON export/import) live in ui/Shortcuts.js, not inline here - see
+  // that file for behavior and comments. updatePropertiesPanel is a
+  // hoisted function declaration defined further down in this same
+  // scope; passing it here is safe regardless of source order since
+  // this call only runs once the whole DOMContentLoaded handler's
+  // declarations have all been hoisted.
   bindShortcuts({
     historyManager,
     canvasManager,
@@ -570,6 +710,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     zoomOut,
     resetZoom,
     updatePropertiesPanel,
+    exportJson,
+    triggerImport,
   });
 
   // Button event listeners
@@ -745,40 +887,53 @@ window.addEventListener("DOMContentLoaded", async () => {
   // (canvasManager, historyManager, toolManager) is already constructed
   // by this point, so no artificial delay is needed.
   async function loadSavedCanvas() {
+    let loaded = null;
+    let migrated = false;
+    let loadFailed = false;
     try {
-      const { document: loaded, migrated } = await persistence.load();
-      if (loaded) {
-        // Keep the loaded document's own id/name/createdAt so re-saving
-        // preserves its identity instead of minting a new document on
-        // every reload; a legitimately-saved empty canvas (every shape
-        // deleted one by one, not via Clear Canvas) still counts as a
-        // real restore, unlike the pre-Document.js version of this
-        // function, which only treated a *non-empty* saved shapes array
-        // as a restore - Document.js's schema is explicit that an empty
-        // objects array is still a valid, real document.
-        currentDocument = loaded;
-        canvasManager.clearCanvas();
-        canvasManager.loadDocumentObjects(loaded.objects);
-        canvasManager.toolManager?.refreshInteractivity();
-        mainLayer.batchDraw();
-        if (migrated) {
-          // Write the upgraded v2 format back immediately so a reload
-          // before the next edit still finds it, rather than silently
-          // re-migrating from the old format on every load until the
-          // user happens to make a change. Before showing "Canvas
-          // restored" below, not after: saveNow's own status callback
-          // sets the same .save-status-text element to "All changes
-          // saved", which would otherwise silently overwrite the more
-          // informative "Canvas restored" message a moment later.
-          await persistence.saveNow(buildCurrentDocument());
-        }
-        showSaveStatus("Canvas restored");
-      } else {
-        showSaveStatus("No saved canvas found");
-      }
+      ({ document: loaded, migrated } = await persistence.load());
     } catch (e) {
       console.error("Failed to restore canvas:", e);
+      loadFailed = true;
+    }
+
+    // See canvasReplacedBeforeInitialLoad's own comment above: Clear
+    // Canvas or an import already ran while this load was still in
+    // flight, so applying it now (or resetting undo history to just
+    // this one state, below) would silently discard what that action
+    // just did. Whichever landed first wins; this one is dropped.
+    if (canvasReplacedBeforeInitialLoad) return;
+
+    if (loadFailed) {
       showSaveStatus("Failed to load canvas");
+    } else if (loaded) {
+      // Keep the loaded document's own id/name/createdAt so re-saving
+      // preserves its identity instead of minting a new document on
+      // every reload; a legitimately-saved empty canvas (every shape
+      // deleted one by one, not via Clear Canvas) still counts as a
+      // real restore, unlike the pre-Document.js version of this
+      // function, which only treated a *non-empty* saved shapes array
+      // as a restore - Document.js's schema is explicit that an empty
+      // objects array is still a valid, real document.
+      currentDocument = loaded;
+      canvasManager.clearCanvas();
+      canvasManager.loadDocumentObjects(loaded.objects);
+      canvasManager.toolManager?.refreshInteractivity();
+      mainLayer.batchDraw();
+      if (migrated) {
+        // Write the upgraded v2 format back immediately so a reload
+        // before the next edit still finds it, rather than silently
+        // re-migrating from the old format on every load until the
+        // user happens to make a change. Before showing "Canvas
+        // restored" below, not after: saveNow's own status callback
+        // sets the same .save-status-text element to "All changes
+        // saved", which would otherwise silently overwrite the more
+        // informative "Canvas restored" message a moment later.
+        await persistence.saveNow(buildCurrentDocument());
+      }
+      showSaveStatus("Canvas restored");
+    } else {
+      showSaveStatus("No saved canvas found");
     }
     historyManager.reset(getCurrentData());
     updateAddFirstObjectCard();

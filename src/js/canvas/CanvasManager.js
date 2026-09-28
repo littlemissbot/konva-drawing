@@ -178,6 +178,33 @@ export class CanvasManager {
     );
   }
 
+  // Import (docs/TASKS.md P1-7) merge mode: adds another document's
+  // objects onto the current canvas without removing what's already
+  // there (unlike loadDocumentObjects, which is a full replace). Any
+  // incoming id that collides with a shape already on the canvas is
+  // replaced with a fresh one - two independently-exported documents
+  // have no reason to share an id, and a duplicate would break
+  // id-based lookups like updateConnections' shape.id() === connection.from
+  // scans. The incoming objects are still sorted by their own zIndex
+  // first so their relative order is preserved; reconstructShapes/
+  // addShape then appends them after everything already on the canvas,
+  // which becomes their new stacking position (toDocumentObjects always
+  // derives zIndex from array position, not a stored field).
+  mergeDocumentObjects(objects) {
+    const existingIds = new Set(this.shapes.map((shape) => shape.id()));
+    const sorted = [...objects].sort((a, b) => a.zIndex - b.zIndex);
+    this.reconstructShapes(
+      sorted.map((obj) => {
+        const incomingId = obj.attrs.id || obj.id;
+        const id =
+          incomingId && !existingIds.has(incomingId)
+            ? incomingId
+            : createId("obj");
+        return { type: obj.type, attrs: { ...obj.attrs, id } };
+      })
+    );
+  }
+
   reconstructShapes(shapes) {
     shapes.forEach((shapeData) => {
       let shape;
