@@ -1,13 +1,14 @@
 import { Stage } from "konva/lib/Stage";
 import { Layer } from "konva/lib/Layer";
-import { ShapeManager } from "./components/ShapeManager.js";
-import { PropertyManager } from "./components/PropertyManager.js";
-import { SVGManager } from "./components/SVGManager.js";
-import { CanvasManager } from "./components/CanvasManager.js";
-import { TextManager } from "./components/TextManager.js";
-import { ToolManager } from "./components/ToolManager.js";
-import { HistoryManager } from "./components/HistoryManager.js";
-import { EventBus } from "./utils/EventBus.js";
+import { ShapeManager } from "./canvas/ShapeManager.js";
+import { PropertyManager } from "./ui/PropertyManager.js";
+import { SVGManager } from "./canvas/SVGManager.js";
+import { CanvasManager } from "./canvas/CanvasManager.js";
+import { TextManager } from "./canvas/TextManager.js";
+import { ToolManager } from "./canvas/ToolManager.js";
+import { HistoryManager } from "./core/HistoryManager.js";
+import { EventBus } from "./core/EventBus.js";
+import { bindShortcuts } from "./ui/Shortcuts.js";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import Konva from "konva";
 
@@ -542,66 +543,22 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Keyboard shortcuts (zoom + undo/redo)
-  document.addEventListener("keydown", (e) => {
-    const mod = e.ctrlKey || e.metaKey;
-    // e.key reflects Shift: the "Z" key reports "z" normally but "Z"
-    // (uppercase) once Shift is held, so Ctrl+Shift+Z never matched
-    // e.key === "z" here before this fix and the standard redo shortcut
-    // silently did nothing (Ctrl+Y still worked). Comparing lower-cased
-    // is robust to Shift and to CapsLock.
-    const key = e.key.toLowerCase();
-    if (mod && !e.target.closest("input, textarea, select")) {
-      if (key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        historyManager.undo();
-        return;
-      }
-      if (key === "y" || (key === "z" && e.shiftKey)) {
-        e.preventDefault();
-        historyManager.redo();
-        return;
-      }
-    }
-    if (mod && e.key === "=") {
-      e.preventDefault();
-      zoomIn();
-    } else if (mod && e.key === "-") {
-      e.preventDefault();
-      zoomOut();
-    } else if (mod && e.key === "0") {
-      e.preventDefault();
-      resetZoom();
-      return;
-    }
-
-    // Delete/Backspace removes the current selection. Suppressed while
-    // typing in an input/textarea/select (e.g. the properties panel's
-    // Name field) so correcting a typo never deletes the shape.
-    if (
-      (e.key === "Delete" || e.key === "Backspace") &&
-      !e.target.closest("input, textarea, select")
-    ) {
-      if (canvasManager.selectedShape) {
-        e.preventDefault();
-        canvasManager.removeShape(canvasManager.selectedShape);
-        canvasManager.deselectShape();
-        updatePropertiesPanel(null);
-      }
-      return;
-    }
-
-    // Escape deselects the current shape and returns to the select tool.
-    // Also suppressed while typing; the inline text editor handles its
-    // own Escape to cancel editing (see TextManager.startEditing).
-    if (e.key === "Escape" && !e.target.closest("input, textarea, select")) {
-      e.preventDefault();
-      toolManager.setTool("cursor");
-      canvasManager.deselectShape();
-      transformer.nodes([]);
-      updatePropertiesPanel(null);
-      mainLayer.batchDraw();
-    }
+  // All global keyboard shortcuts (undo/redo, zoom, delete, escape) live
+  // in ui/Shortcuts.js, not inline here - see that file for behavior and
+  // comments. updatePropertiesPanel is a hoisted function declaration
+  // defined further down in this same scope; passing it here is safe
+  // regardless of source order since this call only runs once the whole
+  // DOMContentLoaded handler's declarations have all been hoisted.
+  bindShortcuts({
+    historyManager,
+    canvasManager,
+    toolManager,
+    transformer,
+    mainLayer,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+    updatePropertiesPanel,
   });
 
   // Button event listeners

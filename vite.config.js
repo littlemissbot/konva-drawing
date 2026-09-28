@@ -24,11 +24,17 @@ export default defineConfig({
     sourcemap: false,
   },
   resolve: {
+    // None of these are actually used by any import in the codebase yet
+    // (all current imports are relative); kept up to date with the
+    // src/js layout (see docs/TASKS.md P0-9) for whenever that changes.
+    // The previous version of this list still pointed at
+    // src/js/components and src/js/utils, both dissolved by that same
+    // restructure, and at src/js/services, which never existed.
     alias: {
       "@": resolve(__dirname, "./src"),
-      "@components": resolve(__dirname, "./src/js/components"),
-      "@utils": resolve(__dirname, "./src/js/utils"),
-      "@services": resolve(__dirname, "./src/js/services"),
+      "@core": resolve(__dirname, "./src/js/core"),
+      "@canvas": resolve(__dirname, "./src/js/canvas"),
+      "@ui": resolve(__dirname, "./src/js/ui"),
       "@assets": resolve(__dirname, "./src/assets"),
     },
   },

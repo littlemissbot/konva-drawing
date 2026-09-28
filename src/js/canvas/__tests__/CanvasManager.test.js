@@ -4,7 +4,7 @@ import { Circle } from "konva/lib/shapes/Circle";
 import { Rect } from "konva/lib/shapes/Rect";
 import { Image as KonvaImage } from "konva/lib/shapes/Image";
 import { CanvasManager } from "../CanvasManager.js";
-import { EventBus } from "../../utils/EventBus.js";
+import { EventBus } from "../../core/EventBus.js";
 
 /**
  * These run against real Konva Stage/Layer/shape instances (jest-canvas-mock
