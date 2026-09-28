@@ -31,18 +31,22 @@ Goal: a clean base that later phases build on without regressions. No visible ne
 
 Goal: nothing is ever lost, and every drawing can get out.
 
+**Scope decision, made before writing any code and recorded here rather than discovered partway through:** this phase builds the versioned document schema, robust persistence, and real export/import — everything in DOC-1 through DOC-5 and EXP-1 through EXP-6 that a user or a future phase actually needs — but does **not** do the PRD §7 architecture's full Store + incremental-Renderer + command-based-History rewrite (originally P1-2 and P1-3, described below). That rewrite's payoff is mostly about enabling real-time collaboration and a much larger shape registry later (Phase 4 and beyond, and explicitly out of scope for this whole roadmap per PRD §3's "out of scope (deferred)"), not anything this phase itself needs — export, import and persistence are all implementable directly against the existing `CanvasManager.shapes` array and Konva `Stage`, which is exactly what the Konva project's own official recipes do. Rewriting the entire live interaction model now — every drag, select, transform and tool switch — would be a multi-day, high-risk change for no benefit this phase requires, especially right after P0-10 demonstrated how easily a change to this exact area (event wiring) can silently break undo. `HistoryManager`'s existing snapshot-based undo/redo, now with 69 passing unit tests behind it, stays as-is. This mirrors the P0-9 decision to defer full `window.*` global removal to the same future work, for the same reason: real, cross-cutting work belongs in the phase that actually needs it, not retrofitted early under a different phase's label.
+
 | ID | Task | PRD | Est | Dep |
 |---|---|---|---|---|
 | P1-1 | `core/Document.js`: v2 schema, `createId()`, validation, `migrate(v1→v2)` with fixtures from real saved data | DOC-1 | 1 | P0-9 |
-| P1-2 | `core/Store.js`: in-memory document, `apply(change)`, change events; Renderer subscribes and patches Konva nodes incrementally | DOC-1 | 1.5 | P1-1 |
-| P1-3 | `core/History.js`: command-based undo/redo (add, remove, updateAttrs, reorder, batch); replaces snapshot `HistoryManager`; 200-step limit | DOC-1 | 1 | P1-2 |
-| P1-4 | `core/Persistence.js`: debounced atomic save, `localStorage` with IndexedDB fallback on quota error, status events (saving/saved/failed) | DOC-2, DOC-3 | 1 | P1-2 |
-| P1-5 | Export PNG/JPEG: content bounding box, temporary stage reset, `pixelRatio` 1/2/3, transparent or background, padding, canvas-size cap with message | EXP-1 | 0.5 | P1-2 |
+| ~~P1-2~~ | ~~`core/Store.js`~~ — deferred to a future phase, see the scope decision above | DOC-1 | — | — |
+| ~~P1-3~~ | ~~`core/History.js`~~ — deferred to a future phase, see the scope decision above; `HistoryManager`'s existing snapshot-based undo/redo stays | DOC-1 | — | — |
+| P1-4 | `core/Persistence.js`: debounced atomic save, `localStorage` with IndexedDB fallback on quota error, status events (saving/saved/failed) | DOC-2, DOC-3 | 1 | P1-1 (redirected from P1-2, which is deferred) |
+| P1-5 | Export PNG/JPEG: content bounding box, temporary stage reset, `pixelRatio` 1/2/3, transparent or background, padding, canvas-size cap with message | EXP-1 | 0.5 | P1-1 (redirected from P1-2) |
 | P1-6 | Export PDF via jsPDF: fit-to-content and A4/Letter with scale-to-fit; selectable text layer from `Text` nodes (px→pt × 0.75) | EXP-2 | 0.5 | P1-5 |
 | P1-7 | JSON export (`Ctrl+S`) and import (`Ctrl+O`, drag-and-drop file) with replace/merge choice | EXP-3 | 0.5 | P1-1 |
 | P1-8 | Export dialog UI (`Ctrl+E`) with format, scale, background, selection-only options and a live preview thumbnail | EXP-1..3 | 0.5 | P1-5 |
 | P1-9 | Print via hidden iframe with the PNG scaled to page | EXP-5 | 0.25 | P1-5 |
-| P1-10 | Unsaved-change guard on `beforeunload` | DOC-5 | 0.1 | P1-4 |
+| P1-10 | ~~Unsaved-change guard on `beforeunload`~~ — already present in `main.js` from before this roadmap existed (warns when `savePending` is true); verified still correct, no new work needed | DOC-5 | 0 (already done) | – |
+
+**P1-1 status: done.** `core/Document.js` (v2 schema, `createId()`, `validateDocument()`, `migrateV1ToV2()`, `parseDocument()`) plus the `CanvasManager.toDocumentObjects()`/`loadDocumentObjects()` bridge to live Konva nodes, and real stable ids assigned at every shape-creation call site (previously nothing set a Konva node's `id` attribute at all, despite `CanvasManager.updateConnections` already reading `shape.id()` for the still-unbuilt Phase 4 connectors feature — a latent gap, not new plumbing). Found and removed along the way: `CanvasManager.saveCanvas()`/`loadCanvas()`, dead code (grepped the whole tree, never called) that used the old unversioned format directly and would have been confusing left next to the new bridge methods. 22 new unit tests (27 total including sub-cases), 69 unit tests overall, 23 e2e tests unchanged and green, lint and format clean.
 
 **AC:** JSON round-trip identical; PNG at 3× of a 4000 px wide drawing exports or reports the cap; PDF text is selectable in Preview and Acrobat; quota failure shows a message and the document remains intact.
 

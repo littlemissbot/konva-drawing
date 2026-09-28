@@ -281,6 +281,8 @@ src/js/
 
 Selection, properties and tool state move out of `main.js` and the `window` globals. `HistoryManager` changes from whole-document snapshots to commands (add, remove, update attrs, reorder) so 500-object documents undo instantly and memory stays flat.
 
+**This is the end-state across the whole roadmap, not a single phase's task list.** `core/Document.js` (schema, ids, migration, validation) is real as of Phase 1 — see `docs/TASKS.md`. `Store.js`, `History.js`'s command rewrite, and `Renderer.js` are deliberately deferred past Phase 1: their payoff is mostly about enabling collaboration and a much larger shape registry later, not anything Phase 1's actual requirements (DOC-1 through DOC-5, EXP-1 through EXP-6) need, since export, import and persistence are all directly implementable against the existing `CanvasManager.shapes` array and Konva `Stage` — which is exactly what Phase 1 does. `docs/TASKS.md`'s Phase 1 section has the fuller reasoning. Until that rewrite happens, `HistoryManager`'s existing snapshot-based undo/redo (well covered by tests as of Phase 0's P0-10) is the real mechanism, not a placeholder.
+
 ---
 
 ## 8. Success metrics
