@@ -7,6 +7,8 @@ import { TextManager } from "./canvas/TextManager.js";
 import { ToolManager } from "./canvas/ToolManager.js";
 import { HistoryManager } from "./core/HistoryManager.js";
 import { EventBus } from "./core/EventBus.js";
+import { Persistence } from "./core/Persistence.js";
+import { createEmptyDocument } from "./core/Document.js";
 import { bindShortcuts } from "./ui/Shortcuts.js";
 import "bootstrap/dist/js/bootstrap.bundle.min.js";
 import Konva from "konva";
@@ -20,7 +22,7 @@ function debounce(func, wait) {
 }
 
 // Wait for DOM to be fully loaded
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   // Initialize event bus for communication between components
   window.eventBus = new EventBus();
 
@@ -178,8 +180,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // Removed save/load button event listeners as only auto-save is needed
 
   // --- Auto-save logic ---
-  let lastSavedData = null;
-  let savePending = false;
   const saveStatus = document.querySelector(".save-status");
   function showSaveStatus(msg = "All changes saved") {
     if (saveStatus) {
@@ -215,6 +215,12 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // The in-memory snapshot format HistoryManager's undo/redo uses is
+  // deliberately unchanged from before Document.js existed (see
+  // docs/TASKS.md Phase 1's scope decision: the command-based History
+  // rewrite is deferred, not this) - it only ever needs a comparable,
+  // restorable string, not full document metadata or zIndex ordering
+  // (shape array order already carries that).
   function getCurrentData() {
     return JSON.stringify({
       shapes: canvasManager.shapes.map((shape) =>
@@ -233,13 +239,10 @@ window.addEventListener("DOMContentLoaded", () => {
     mainLayer.batchDraw();
     updateAddFirstObjectCard();
     updatePropertiesPanel(null);
-    try {
-      localStorage.setItem("canvasData", json);
-      lastSavedData = json;
-    } catch (e) {
-      console.error("Failed to persist canvas after undo/redo:", e);
-    }
-    savePending = false;
+    // An undo/redo is itself a change worth persisting, same as any
+    // edit - scheduleSave, not saveNow, so rapid undo/redo presses
+    // still debounce together instead of writing on every keystroke.
+    persistence.scheduleSave(buildCurrentDocument());
   }
 
   const historyManager = new HistoryManager({
@@ -253,27 +256,43 @@ window.addEventListener("DOMContentLoaded", () => {
     historyManager.commit();
   }, 400);
 
-  const debouncedAutoSave = debounce(() => {
-    const data = getCurrentData();
-    if (data !== lastSavedData) {
-      try {
-        localStorage.setItem("canvasData", data);
-        lastSavedData = data;
-        showSaveStatus("All changes saved");
-        savePending = false;
-      } catch (e) {
-        console.error("Failed to save canvas data:", e);
+  // The persistent (localStorage/IndexedDB) document, as opposed to
+  // getCurrentData()'s lightweight undo/redo snapshot above. Starts as
+  // a fresh empty document's metadata; loadSavedCanvas() below replaces
+  // it with the loaded document's own id/name/createdAt if one exists,
+  // so re-saving keeps the same document identity across a reload
+  // rather than minting a new id on every save.
+  let currentDocument = createEmptyDocument();
+
+  function buildCurrentDocument() {
+    return {
+      ...currentDocument,
+      updatedAt: Date.now(),
+      objects: canvasManager.toDocumentObjects(),
+    };
+  }
+
+  const persistence = new Persistence({
+    debounceMs: 2000,
+    maxWaitMs: 10000,
+    onStatusChange: ({ state, backend, error }) => {
+      if (state === "saving") {
+        showSaveStatus("Saving changes...");
+      } else if (state === "saved") {
+        showSaveStatus(
+          backend === "indexeddb"
+            ? "All changes saved (backup storage)"
+            : "All changes saved"
+        );
+      } else if (state === "failed") {
+        console.error("FrameX: failed to save the document:", error);
         showSaveStatus("Failed to save changes");
       }
-    }
-  }, 2000);
+    },
+  });
 
   function markDirty() {
-    if (!savePending) {
-      savePending = true;
-      showSaveStatus("Saving changes...");
-    }
-    debouncedAutoSave();
+    persistence.scheduleSave(buildCurrentDocument());
   }
 
   // Listen for changes to trigger auto-save
@@ -312,23 +331,16 @@ window.addEventListener("DOMContentLoaded", () => {
     propertiesForm.addEventListener("input", debouncedHistoryCommit);
   }
 
-  // Periodic save every 10 seconds
-  setInterval(() => {
-    if (savePending) {
-      debouncedAutoSave();
-    }
-  }, 10000);
-
   // Add beforeunload event listener to warn about unsaved changes
   window.addEventListener("beforeunload", (e) => {
-    if (savePending) {
+    if (persistence.isSaving) {
       e.preventDefault();
       e.returnValue = "";
     }
   });
 
   // Clear Canvas button
-  document.getElementById("clearBtn").addEventListener("click", () => {
+  document.getElementById("clearBtn").addEventListener("click", async () => {
     if (
       confirm(
         "Clear the entire canvas? You can use Undo (Ctrl+Z) to restore this version."
@@ -336,8 +348,7 @@ window.addEventListener("DOMContentLoaded", () => {
     ) {
       historyManager.commit();
       canvasManager.clearCanvas();
-      localStorage.removeItem("canvasData");
-      lastSavedData = null;
+      await persistence.clear();
       historyManager.commit();
       showSaveStatus("Canvas cleared");
     }
@@ -733,34 +744,45 @@ window.addEventListener("DOMContentLoaded", () => {
   // synchronously, at the end of this handler: every manager it touches
   // (canvasManager, historyManager, toolManager) is already constructed
   // by this point, so no artificial delay is needed.
-  function loadSavedCanvas() {
-    const data = localStorage.getItem("canvasData");
-    if (data) {
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed && parsed.shapes && parsed.shapes.length > 0) {
-          canvasManager.clearCanvas();
-          canvasManager.reconstructShapes(parsed.shapes);
-          canvasManager.toolManager?.refreshInteractivity();
-          mainLayer.batchDraw();
-          lastSavedData = data;
-          showSaveStatus("Canvas restored");
-          historyManager.reset(getCurrentData());
-          updateAddFirstObjectCard();
-          return;
+  async function loadSavedCanvas() {
+    try {
+      const { document: loaded, migrated } = await persistence.load();
+      if (loaded) {
+        // Keep the loaded document's own id/name/createdAt so re-saving
+        // preserves its identity instead of minting a new document on
+        // every reload; a legitimately-saved empty canvas (every shape
+        // deleted one by one, not via Clear Canvas) still counts as a
+        // real restore, unlike the pre-Document.js version of this
+        // function, which only treated a *non-empty* saved shapes array
+        // as a restore - Document.js's schema is explicit that an empty
+        // objects array is still a valid, real document.
+        currentDocument = loaded;
+        canvasManager.clearCanvas();
+        canvasManager.loadDocumentObjects(loaded.objects);
+        canvasManager.toolManager?.refreshInteractivity();
+        mainLayer.batchDraw();
+        if (migrated) {
+          // Write the upgraded v2 format back immediately so a reload
+          // before the next edit still finds it, rather than silently
+          // re-migrating from the old format on every load until the
+          // user happens to make a change. Before showing "Canvas
+          // restored" below, not after: saveNow's own status callback
+          // sets the same .save-status-text element to "All changes
+          // saved", which would otherwise silently overwrite the more
+          // informative "Canvas restored" message a moment later.
+          await persistence.saveNow(buildCurrentDocument());
         }
-      } catch (e) {
-        console.error("Failed to restore canvas:", e);
-        showSaveStatus("Failed to load canvas");
-        historyManager.reset(getCurrentData());
-        updateAddFirstObjectCard();
-        return;
+        showSaveStatus("Canvas restored");
+      } else {
+        showSaveStatus("No saved canvas found");
       }
+    } catch (e) {
+      console.error("Failed to restore canvas:", e);
+      showSaveStatus("Failed to load canvas");
     }
-    showSaveStatus("No saved canvas found");
     historyManager.reset(getCurrentData());
     updateAddFirstObjectCard();
   }
 
-  loadSavedCanvas();
+  await loadSavedCanvas();
 });
