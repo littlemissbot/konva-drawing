@@ -4,15 +4,17 @@
  * handling and ui/HelpDialog.js's "?" reference listing, so the two
  * can never drift apart - a shortcut shown in the dialog is guaranteed
  * to be one Shortcuts.js (or ToolManager, for the marquee's own
- * shift-click/shift-drag) really binds.
+ * shift-click/shift-drag; or main.js's own "paste" listener, for Paste
+ * below - docs/TASKS.md P2-4 needs the native paste DOM event's
+ * clipboardData, which a keydown handler never sees) really binds.
  *
  * This is deliberately NOT the PRD's full Appendix B table. Appendix B
  * also lists shortcuts for tools and features this app doesn't have
  * yet at all - Hand/pan (NAV-1), Highlighter and Eraser (no such
  * tools), Arrow and Connector (no such shape/tool - Phase 3/4),
- * copy/cut/paste/duplicate (docs/TASKS.md P2-4), group/ungroup (P2-6),
- * lock/unlock (P2-7), z-order (P2-8), grid/snap toggle (no grid
- * feature - NAV-3), zoom-to-selection (no such zoom mode yet). Listing
+ * group/ungroup (P2-6), lock/unlock (P2-7), z-order (P2-8), grid/snap
+ * toggle (no grid feature - NAV-3), zoom-to-selection (no such zoom
+ * mode yet). Listing
  * those here and in the Help dialog would tell a user a shortcut does
  * something when pressing it currently does nothing at all - worse
  * than not mentioning it. Each of those lands in this same table (and
@@ -42,6 +44,15 @@ export const SHORTCUT_GROUPS = [
       { action: "Select all", keys: "Mod+A" },
       { action: "Delete selection", keys: "Delete / Backspace" },
       { action: "Deselect / cancel tool", keys: "Esc" },
+    ],
+  },
+  {
+    title: "Clipboard",
+    shortcuts: [
+      { action: "Copy", keys: "Mod+C" },
+      { action: "Cut", keys: "Mod+X" },
+      { action: "Paste", keys: "Mod+V" },
+      { action: "Duplicate", keys: "Mod+D" },
     ],
   },
   {

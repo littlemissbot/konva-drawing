@@ -380,6 +380,54 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
+  // Paste (docs/TASKS.md P2-4): the native "paste" DOM event, not a
+  // Ctrl+V keydown in ui/Shortcuts.js - only this event exposes
+  // clipboardData (an image or plain text the user copied from outside
+  // this app), which a keydown handler never sees. Suppressed while
+  // typing (e.g. the properties panel's Name field) so an ordinary text
+  // paste there keeps working natively - same `typing` gate reasoning as
+  // every shortcut in Shortcuts.js.
+  document.addEventListener("paste", (e) => {
+    const typing = !!e.target?.closest?.("input, textarea, select");
+    if (typing) return;
+
+    // This app's own copy/cut (Ctrl+C/Ctrl+X -> canvasManager.
+    // copySelection/cutSelection) always wins over whatever the real
+    // system clipboard happens to hold - otherwise pasting a
+    // just-copied shape back could be shadowed by an unrelated image or
+    // text actually sitting in the OS clipboard.
+    if (canvasManager.clipboard.hasContent) {
+      e.preventDefault();
+      canvasManager.pasteClipboard();
+      return;
+    }
+
+    const items = e.clipboardData?.items;
+    const imageItem = items
+      ? Array.from(items).find((item) => item.type?.startsWith("image/"))
+      : null;
+    if (imageItem) {
+      e.preventDefault();
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        shapeManager.createImageFromDataUrl(reader.result);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    // Plain-text paste creates a Text shape pre-filled with it
+    // (docs/TASKS.md P2-4) - the only remaining clipboard content this
+    // app knows what to do with.
+    const text = e.clipboardData?.getData("text/plain");
+    if (text) {
+      e.preventDefault();
+      textManager.createText(text);
+    }
+  });
+
   // Clear Canvas button
   document.getElementById("clearBtn").addEventListener("click", async () => {
     if (

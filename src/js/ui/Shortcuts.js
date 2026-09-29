@@ -118,6 +118,30 @@ export function bindShortcuts({
         canvasManager.selectAll();
         return;
       }
+      // Ctrl/Cmd+C / +X / +D: copy/cut/duplicate the current selection
+      // (docs/TASKS.md P2-4), into this app's own in-memory clipboard -
+      // see canvas/Clipboard.js's own comment for why that's not the OS
+      // clipboard. Paste (+V) is deliberately NOT handled here: it needs
+      // the native "paste" DOM event's clipboardData to also support
+      // pasting an image or plain text copied from outside the app (see
+      // main.js's own "paste" listener), which a keydown handler has no
+      // access to. Prevented even with nothing selected, so e.g. Ctrl+D
+      // never falls through to the browser's own "bookmark this page".
+      if (key === "c") {
+        e.preventDefault();
+        canvasManager.copySelection();
+        return;
+      }
+      if (key === "x") {
+        e.preventDefault();
+        canvasManager.cutSelection();
+        return;
+      }
+      if (key === "d") {
+        e.preventDefault();
+        canvasManager.duplicateSelection();
+        return;
+      }
     }
     if (mod && e.key === "=") {
       e.preventDefault();

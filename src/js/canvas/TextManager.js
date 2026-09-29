@@ -13,12 +13,16 @@ export class TextManager {
     return `Text ${this.textCount}`;
   }
 
-  createText() {
+  // `initialText` (docs/TASKS.md P2-4): pasting plain text from the
+  // system clipboard creates a Text shape pre-filled with it, via
+  // main.js's "paste" listener - the T shortcut and the toolbar's Text
+  // button both still get the placeholder via the default.
+  createText(initialText = "Double click to edit") {
     const name = this.getUniqueName();
     const text = new Text({
       x: this.canvasManager.stage.width() / 2,
       y: this.canvasManager.stage.height() / 2,
-      text: "Double click to edit",
+      text: initialText,
       fontSize: 16,
       fontFamily: "Poppins",
       fill: "#000000",

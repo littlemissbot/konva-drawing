@@ -3,7 +3,18 @@ import { Rect } from "konva/lib/shapes/Rect";
 import { Line } from "konva/lib/shapes/Line";
 import { RegularPolygon } from "konva/lib/shapes/RegularPolygon";
 import { Star } from "konva/lib/shapes/Star";
+import Konva from "konva";
 import { createId } from "../core/Document.js";
+
+// Pasted images (docs/TASKS.md P2-4) are capped to this on their longest
+// edge so a full-resolution screenshot doesn't dwarf the canvas - the
+// pixels themselves stay embedded at full resolution (see
+// createImageFromDataUrl below and CanvasManager.toStorageShape's
+// imageSrc), only the on-canvas display size is capped here. Real
+// re-encoding to actually shrink the stored pixels, plus a document-size
+// warning at 80% of some budget, is docs/TASKS.md P6-2's job (depends on
+// P1-4, not this task) - deliberately not built here.
+const PASTED_IMAGE_MAX_EDGE = 400;
 
 export class ShapeManager {
   constructor(canvasManager) {
@@ -17,6 +28,7 @@ export class ShapeManager {
       Star: 0,
       Text: 0,
       SVG: 0,
+      Image: 0,
     };
   }
 
@@ -144,5 +156,47 @@ export class ShapeManager {
     this.canvasManager.setupShapeEvents(star, "Star");
     this.canvasManager.addShape(star);
     window.eventBus.emit("shapeAdded");
+  }
+
+  // System image paste (docs/TASKS.md P2-4): unlike createSVG, there is
+  // no bundled asset file to reference by name - dataUrl is the pasted
+  // image's own pixels, embedded directly (CanvasManager.toStorageShape's
+  // imageSrc), so it round-trips through save/undo/export with nothing
+  // else to fetch. Sizing needs the image to actually finish loading
+  // first (to read its natural width/height), which Konva.Image.fromURL
+  // only reports via callback - unlike every other create* method above,
+  // this one can't set final attrs synchronously.
+  createImageFromDataUrl(dataUrl, { x, y } = {}) {
+    const name = this.getUniqueName("Image");
+    Konva.Image.fromURL(
+      dataUrl,
+      (image) => {
+        const naturalWidth = image.width();
+        const naturalHeight = image.height();
+        const scale = Math.min(
+          1,
+          PASTED_IMAGE_MAX_EDGE / Math.max(naturalWidth, naturalHeight, 1)
+        );
+        const width = Math.round(naturalWidth * scale) || 1;
+        const height = Math.round(naturalHeight * scale) || 1;
+        image.setAttrs({
+          x: x ?? this.canvasManager.stage.width() / 2 - width / 2,
+          y: y ?? this.canvasManager.stage.height() / 2 - height / 2,
+          width,
+          height,
+          draggable: true,
+          name,
+          id: createId(),
+          imageSrc: dataUrl,
+        });
+        this.canvasManager.setupShapeEvents(image, name);
+        this.canvasManager.addShape(image);
+        this.canvasManager.selectShape(image);
+        window.eventBus.emit("shapeAdded");
+      },
+      () => {
+        console.warn("FrameX: could not load the pasted image.");
+      }
+    );
   }
 }

@@ -8,6 +8,13 @@ import { Group } from "konva/lib/Group";
 import Konva from "konva";
 import { createId } from "../core/Document.js";
 import { Selection } from "./Selection.js";
+import { Clipboard } from "./Clipboard.js";
+
+// Default paste/duplicate offset (docs/TASKS.md P2-4): visibly distinct
+// from the original without straying far, and consistently diagonal so
+// repeated pastes/duplicates fan out instead of stacking exactly on top
+// of each other.
+const CLIPBOARD_OFFSET = { x: 20, y: 20 };
 
 export class CanvasManager {
   // `transformer` is optional (existing tests construct a CanvasManager
@@ -22,6 +29,7 @@ export class CanvasManager {
     this.tooltipLayer = tooltipLayer;
     this.transformer = transformer;
     this.selection = new Selection();
+    this.clipboard = new Clipboard();
     this.shapes = [];
     this.connections = [];
     this.textManager = null;
@@ -85,25 +93,31 @@ export class CanvasManager {
       // attr, which is not serializable (and not meaningful) JSON, so
       // this type gets an explicit allow-list instead of the generic
       // attrs spread used below. iconFile is the origin-independent
-      // asset reference; see SVGManager.createSVG for why we don't
-      // persist image.image().src (an absolute, origin-baked URL).
+      // asset reference for a bundled SVG icon (SVGManager.createSVG);
+      // imageSrc is a self-contained data: URL for an image pasted from
+      // the system clipboard (docs/TASKS.md P2-4, ShapeManager.
+      // createImageFromDataUrl) - there is no bundled asset file to
+      // reference, so the pixels themselves are embedded directly. A
+      // shape only ever carries one of the two.
       const attrs = shape.getAttrs();
+      const base = {
+        id: shape.id(),
+        x: shape.x(),
+        y: shape.y(),
+        width: shape.width(),
+        height: shape.height(),
+        rotation: shape.rotation(),
+        scaleX: shape.scaleX(),
+        scaleY: shape.scaleY(),
+        opacity: shape.opacity(),
+        draggable: shape.draggable(),
+        name: shape.getAttr("name") || "",
+      };
       return {
         type,
-        attrs: {
-          id: shape.id(),
-          x: shape.x(),
-          y: shape.y(),
-          width: shape.width(),
-          height: shape.height(),
-          rotation: shape.rotation(),
-          scaleX: shape.scaleX(),
-          scaleY: shape.scaleY(),
-          opacity: shape.opacity(),
-          draggable: shape.draggable(),
-          name: shape.getAttr("name") || "",
-          iconFile: attrs.iconFile || "",
-        },
+        attrs: attrs.iconFile
+          ? { ...base, iconFile: attrs.iconFile }
+          : { ...base, imageSrc: attrs.imageSrc || "" },
       };
     }
     const attrs = shape.getAttrs();
@@ -287,6 +301,83 @@ export class CanvasManager {
     }
   }
 
+  /** Copies the current selection's shapes into this app's own in-memory
+   * clipboard (see Clipboard.js for why it's not the OS clipboard). A
+   * no-op with nothing selected - it does not clear a previous copy. */
+  copySelection() {
+    if (this.selection.size === 0) return;
+    this.clipboard.write(
+      this.selectedShapes.map((shape) => this.toStorageShape(shape))
+    );
+  }
+
+  /** Copies the current selection, then removes it - one removeShapes
+   * call, so (like Delete) it commits a single undo checkpoint rather
+   * than one per shape. */
+  cutSelection() {
+    if (this.selection.size === 0) return;
+    this.copySelection();
+    const shapes = this.selectedShapes;
+    this.deselectShape();
+    this.removeShapes(shapes);
+  }
+
+  /** Pastes whatever this app's clipboard is currently holding, offset
+   * from where it was copied so it doesn't land exactly on top of the
+   * original, and selects the newly-pasted shapes. A no-op if nothing
+   * has been copied/cut yet. */
+  pasteClipboard(offset = CLIPBOARD_OFFSET) {
+    const stored = this.clipboard.read();
+    if (!stored) return;
+    this._instantiateOffset(stored, offset);
+  }
+
+  /** Copies the current selection and immediately pastes it back with an
+   * offset, without touching the clipboard - so duplicating a shape never
+   * clobbers whatever a previous real copy would otherwise paste. */
+  duplicateSelection(offset = CLIPBOARD_OFFSET) {
+    if (this.selection.size === 0) return;
+    const stored = this.selectedShapes.map((shape) =>
+      this.toStorageShape(shape)
+    );
+    this._instantiateOffset(stored, offset);
+  }
+
+  // Shared tail of pasteClipboard/duplicateSelection: rebuilds each
+  // stored shape with a fresh id and an offset position, waits for every
+  // one of them to actually land (reconstructShapes' onSettled - Image
+  // shapes load asynchronously, everything else is synchronous, and
+  // mixing the two is exactly why onSettled counts rather than assuming
+  // reconstructShapes is done when it returns), then selects the whole
+  // pasted/duplicated batch and emits a single "shapeAdded" - one undo
+  // checkpoint for the whole paste, the same reasoning as removeShapes'
+  // single "shapeRemoved" above.
+  _instantiateOffset(storedShapes, offset) {
+    if (storedShapes.length === 0) return;
+    const objects = storedShapes.map((stored) => ({
+      type: stored.type,
+      attrs: {
+        ...stored.attrs,
+        id: createId(),
+        x: (stored.attrs.x ?? 0) + offset.x,
+        y: (stored.attrs.y ?? 0) + offset.y,
+      },
+    }));
+    const landed = [];
+    let settled = 0;
+    const finish = () => {
+      if (landed.length > 0) this.selectShapes(landed);
+      window.eventBus.emit("shapeAdded");
+    };
+    this.reconstructShapes(objects, {
+      onSettled: (shape) => {
+        if (shape) landed.push(shape);
+        settled += 1;
+        if (settled === objects.length) finish();
+      },
+    });
+  }
+
   // Bridge to the core/Document.js v2 schema (docs/TASKS.md P1-1). Kept
   // here rather than in Document.js itself, which is deliberately
   // Konva-agnostic: this is the one place that knows how to walk live
@@ -346,7 +437,18 @@ export class CanvasManager {
     );
   }
 
-  reconstructShapes(shapes) {
+  // `onSettled(shape | null)` (docs/TASKS.md P2-4) fires exactly once per
+  // input object, in the same order for the synchronous types but not
+  // necessarily for Image (its fromURL load is async, so it can settle
+  // after later synchronous entries already have) - null means the
+  // object produced no shape (unknown type, or an Image with neither
+  // iconFile nor imageSrc). Every existing caller (load, import's merge,
+  // undo/redo's applyCanvasSnapshot) omits it and is unaffected; paste/
+  // duplicate (below) use it to know when every pasted object - Image's
+  // async ones included - has actually landed, so they select the whole
+  // pasted batch and commit one history checkpoint only once, not one at
+  // a time as each shape happens to finish.
+  reconstructShapes(shapes, { onSettled } = {}) {
     shapes.forEach((shapeData) => {
       let shape;
       const type = shapeData.type;
@@ -416,6 +518,7 @@ export class CanvasManager {
           }
           this.setupShapeEvents(group, "StickyNote");
           this.addShape(group);
+          onSettled?.(group);
           return;
         }
         case "Image": {
@@ -426,11 +529,15 @@ export class CanvasManager {
           // the right icon even though the full URL (baked to whatever
           // origin/path was live when it was saved) is not directly
           // usable. This keeps pre-fix saved drawings loadable rather
-          // than silently dropping those shapes.
+          // than silently dropping those shapes. imageSrc (docs/TASKS.md
+          // P2-4) is the other possible source: a self-contained data:
+          // URL for an image pasted from the system clipboard, with no
+          // bundled asset file to fall back to at all.
           const iconFile =
             attrs.iconFile || (attrs.svgUrl || "").split("/").pop() || "";
-          if (!iconFile) break;
-          const url = `assets/svgs/${iconFile}`;
+          const imageSrc = !iconFile ? attrs.imageSrc || "" : "";
+          if (!iconFile && !imageSrc) break;
+          const url = iconFile ? `assets/svgs/${iconFile}` : imageSrc;
           Konva.Image.fromURL(
             url,
             (image) => {
@@ -446,17 +553,22 @@ export class CanvasManager {
                 opacity: attrs.opacity ?? 1,
                 name: attrs.name || "",
                 draggable: true,
-                iconFile,
+                ...(iconFile ? { iconFile } : { imageSrc }),
               });
-              this.setupShapeEvents(image, "SVG");
+              this.setupShapeEvents(image, iconFile ? "SVG" : "Image");
               this.addShape(image);
+              onSettled?.(image);
             },
             () => {
               console.warn(
-                `FrameX: could not load saved icon "${iconFile}" ` +
-                  `(from ${url}); the shape was dropped from the ` +
-                  `restored canvas.`
+                iconFile
+                  ? `FrameX: could not load saved icon "${iconFile}" ` +
+                      `(from ${url}); the shape was dropped from the ` +
+                      `restored canvas.`
+                  : "FrameX: could not load a pasted image; the shape " +
+                      "was dropped from the restored canvas."
               );
+              onSettled?.(null);
             }
           );
           return;
@@ -468,6 +580,7 @@ export class CanvasManager {
         this.setupShapeEvents(shape, type);
         this.addShape(shape);
       }
+      onSettled?.(shape || null);
     });
   }
 
