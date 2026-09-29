@@ -54,10 +54,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     height: container.offsetHeight,
   });
 
-  // Create layers
+  // Create layers. guidesLayer is transient UI drawn over the shapes
+  // but not part of the document itself - today just the marquee-select
+  // rectangle (docs/TASKS.md P2-2); a natural home for smart guides
+  // later (PRD NAV-4) without needing a new layer then too. Stacked
+  // above mainLayer (so the marquee is visible while dragging over
+  // shapes) and below tooltipLayer (tooltips should still win if they
+  // ever overlap, which in practice they don't - a tooltip only shows
+  // on hover over a shape, the marquee only while dragging empty canvas).
   const mainLayer = new Layer();
+  const guidesLayer = new Layer({ listening: false });
   const tooltipLayer = new Layer();
   stage.add(mainLayer);
+  stage.add(guidesLayer);
   stage.add(tooltipLayer);
 
   // Add transformer for resize/rotate
@@ -159,6 +168,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     stage,
     canvasManager,
     textManager,
+    guidesLayer,
   });
   canvasManager.setToolManager(toolManager);
 

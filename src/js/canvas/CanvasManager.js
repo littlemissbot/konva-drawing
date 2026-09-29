@@ -120,6 +120,12 @@ export class CanvasManager {
   setupEventListeners() {
     this.stage.on("click", (e) => {
       if (e.target === this.stage) {
+        // See ToolManager.consumeSuppressedClick's own comment: a real
+        // marquee drag (docs/TASKS.md P2-2) sets this the moment it's
+        // confirmed to be a real drag, specifically so it's already
+        // true by the time this fires - without it, this handler would
+        // immediately deselect whatever the marquee just selected.
+        if (this.toolManager?.consumeSuppressedClick()) return;
         this.deselectShape();
       }
     });
@@ -162,7 +168,21 @@ export class CanvasManager {
 
   /** Every shape becomes selected (Ctrl+A). */
   selectAll() {
-    this.selection.set(this.shapes);
+    this.selectShapes(this.shapes);
+  }
+
+  /** Selects every shape given (docs/TASKS.md P2-2's marquee select is
+   * the main caller, with a whole batch at once rather than one shape
+   * at a time): replaces the whole selection, or unions into it when
+   * `additive` is true (Shift held during the marquee drag) - the same
+   * union semantics toggleSelect gives a single shift-clicked shape,
+   * just for a batch. */
+  selectShapes(shapes, { additive = false } = {}) {
+    if (additive) {
+      shapes.forEach((shape) => this.selection.add(shape));
+    } else {
+      this.selection.set(shapes);
+    }
     this._afterSelectionChanged();
   }
 
