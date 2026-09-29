@@ -26,7 +26,10 @@ const CLIPBOARD_OFFSET = { x: 20, y: 20 };
 // _buildSimpleShape). A future task can extend this if a real need for
 // nested/image-bearing groups shows up; today's grouping needs (basic
 // shapes, freehand strokes, text) are all synchronous already.
-const GROUPABLE_CLASS_NAMES = new Set([
+// Exported so ui/ContextMenu.js (docs/TASKS.md P2-10) can decide
+// whether "Group" applies to the current selection without duplicating
+// this list.
+export const GROUPABLE_CLASS_NAMES = new Set([
   "Circle",
   "Rect",
   "Line",
@@ -780,6 +783,29 @@ export class CanvasManager {
     this._instantiateOffset(stored, offset);
   }
 
+  // Recursively mints a fresh id for a stored shape - and, if it's a
+  // real Group (docs/TASKS.md P2-6), every one of its children too, not
+  // just the group's own top-level id. Found missing while verifying
+  // Phase 2's own stated AC ("copy-paste of a group preserves
+  // structure"): pasting/duplicating a group correctly rebuilt its
+  // children (same types, names, count) but left each child carrying
+  // the *original* group's child ids, unchanged - nothing in this app
+  // currently reads a group child's id (connections aren't wired to
+  // group members, and Document.js's own duplicate-id check only looks
+  // at top-level document objects), so this had no visible symptom
+  // today, but two live shapes secretly sharing an id is exactly the
+  // kind of latent bug worth closing the moment it's found rather than
+  // leaving for whichever future feature (e.g. a per-object properties
+  // or object-list panel) first needs a child's id to actually be
+  // unique.
+  _withFreshId(stored) {
+    const attrs = { ...stored.attrs, id: createId() };
+    if (stored.type === "Group" && Array.isArray(attrs.children)) {
+      attrs.children = attrs.children.map((child) => this._withFreshId(child));
+    }
+    return { type: stored.type, attrs };
+  }
+
   // Shared tail of pasteClipboard/duplicateSelection: rebuilds each
   // stored shape with a fresh id and an offset position, waits for every
   // one of them to actually land (reconstructShapes' onSettled - Image
@@ -791,15 +817,17 @@ export class CanvasManager {
   // single "shapeRemoved" above.
   _instantiateOffset(storedShapes, offset) {
     if (storedShapes.length === 0) return;
-    const objects = storedShapes.map((stored) => ({
-      type: stored.type,
-      attrs: {
-        ...stored.attrs,
-        id: createId(),
-        x: (stored.attrs.x ?? 0) + offset.x,
-        y: (stored.attrs.y ?? 0) + offset.y,
-      },
-    }));
+    const objects = storedShapes.map((stored) => {
+      const fresh = this._withFreshId(stored);
+      return {
+        type: fresh.type,
+        attrs: {
+          ...fresh.attrs,
+          x: (fresh.attrs.x ?? 0) + offset.x,
+          y: (fresh.attrs.y ?? 0) + offset.y,
+        },
+      };
+    });
     const landed = [];
     let settled = 0;
     const finish = () => {

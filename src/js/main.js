@@ -27,6 +27,7 @@ import {
 } from "./ui/HelpDialog.js";
 import { SHORTCUT_GROUPS } from "./ui/shortcuts-data.js";
 import { bindShortcuts } from "./ui/Shortcuts.js";
+import { ContextMenu } from "./ui/ContextMenu.js";
 // The named import (not a bare `import "bootstrap/.../bootstrap.bundle.min.js"`
 // side-effect import) matters: that bundle is a UMD build whose global-
 // scope fallback resolves to `undefined` in Vite's ESM output, so
@@ -187,6 +188,36 @@ window.addEventListener("DOMContentLoaded", async () => {
   // disabled pending docs/TASKS.md P7-1. Exposed here for consistency
   // with the other managers and so it is reachable ahead of that work.
   window.svgManager = svgManager;
+
+  // Right-click context menu (docs/TASKS.md P2-10). Bound on the Stage
+  // (not the container div) so e.target is the actual Konva node under
+  // the cursor - a shape, or the stage itself for empty canvas, the
+  // same distinction the marquee/pen bindings already rely on.
+  const contextMenuEl = document.getElementById("contextMenu");
+  const contextMenu = contextMenuEl
+    ? new ContextMenu({ menuEl: contextMenuEl, canvasManager })
+    : null;
+  stage.on("contextmenu", (e) => {
+    e.evt.preventDefault();
+    let target = e.target;
+    if (target !== stage) {
+      // Right-clicking a group's child resolves to the whole group
+      // unless that group is currently "entered" (docs/TASKS.md P2-6) -
+      // the same rule a left-click on that child already applies via
+      // CanvasManager._setupGroupChildEvents, so right-click selection
+      // behaves the same way left-click does.
+      if (
+        canvasManager._isGroupChild(target) &&
+        canvasManager._enteredGroup !== target.getParent()
+      ) {
+        target = target.getParent();
+      }
+      if (!canvasManager.selectedShapes.includes(target)) {
+        canvasManager.selectShape(target);
+      }
+    }
+    contextMenu?.open(e.evt.clientX, e.evt.clientY);
+  });
 
   document.getElementById("selectTool")?.addEventListener("click", () => {
     toolManager.setTool("cursor");

@@ -842,6 +842,39 @@ describe("CanvasManager clipboard", () => {
     canvasManager.duplicateSelection();
     expect(canvasManager.shapes).toHaveLength(0);
   });
+
+  // docs/PRD.md Phase 2's own stated AC: "copy-paste of a group
+  // preserves structure." P2-4 (this describe block) and P2-6 (group)
+  // were each tested against plain shapes on their own, never together
+  // - this verifies the two actually compose, not just that each works
+  // in isolation.
+  test("copy-paste of a real group preserves its structure (children, types, names)", () => {
+    const a = new Circle({ x: 10, y: 10, radius: 5, name: "A" });
+    const b = new Circle({ x: 50, y: 50, radius: 5, name: "B" });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.selectedShape;
+    canvasManager.copySelection();
+
+    canvasManager.pasteClipboard();
+
+    expect(canvasManager.shapes).toHaveLength(2); // original group + pasted one
+    const pasted = canvasManager.selectedShape;
+    expect(pasted).not.toBe(group);
+    expect(pasted.getClassName()).toBe("Group");
+    expect(pasted.getAttr("toolType")).toBe("group");
+    const children = pasted.getChildren();
+    expect(children).toHaveLength(2);
+    expect(children.map((c) => c.getClassName())).toEqual(["Circle", "Circle"]);
+    expect(children.map((c) => c.getAttr("name")).sort()).toEqual(["A", "B"]);
+    // The pasted group's own id, and each child's, are fresh - not
+    // shared with the original group or its children.
+    expect(pasted.id()).not.toBe(group.id());
+    const originalChildIds = [a.id(), b.id()];
+    children.forEach((c) => expect(originalChildIds).not.toContain(c.id()));
+  });
 });
 
 // docs/TASKS.md P2-5: arrow-key nudge.

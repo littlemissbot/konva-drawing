@@ -426,6 +426,12 @@
       </div>
     </div>
 
+    <!-- Right-click context menu (docs/TASKS.md P2-10). Not a Bootstrap
+         component - it needs to open at the cursor's own position, not
+         a fixed toggle button, so ui/ContextMenu.js positions and shows/
+         hides it directly. Hidden by default via style.css. -->
+    <ul id="contextMenu" class="context-menu" role="menu"></ul>
+
     <script type="module" src="./js/main.js"></script>
   </body>
 </html>
