@@ -109,6 +109,7 @@ export class CanvasManager {
           scaleY: shape.scaleY(),
           opacity: shape.opacity(),
           name: shape.getAttr("name") || "",
+          locked: !!shape.getAttr("locked"),
           children: shape
             .getChildren()
             .map((child) => this.toStorageShape(child)),
@@ -132,6 +133,7 @@ export class CanvasManager {
           scaleY: shape.scaleY(),
           opacity: shape.opacity(),
           name: shape.name(),
+          locked: !!shape.getAttr("locked"),
           rect: rect ? rect.getAttrs() : {},
           text: textNode
             ? {
@@ -167,6 +169,7 @@ export class CanvasManager {
         opacity: shape.opacity(),
         draggable: shape.draggable(),
         name: shape.getAttr("name") || "",
+        locked: !!shape.getAttr("locked"),
       };
       return {
         type,
@@ -316,9 +319,16 @@ export class CanvasManager {
     // transformer to it would visually fight with that overlay. This
     // generalizes what was previously a single-shape special case to a
     // filter, since a multi-select could in principle include a shape
-    // currently being edited alongside others that aren't.
+    // currently being edited alongside others that aren't. A locked
+    // shape (docs/TASKS.md P2-7) is excluded too - "locked objects skip
+    // transformer" is this task's own stated requirement, so resize/
+    // rotate handles never appear on one even while it's selected
+    // (selecting it - to unlock it again - still works; only the
+    // transformer attachment is skipped).
     const nodes = this.selection.shapes.filter(
-      (shape) => !(shape.getClassName() === "Text" && shape.isEditing)
+      (shape) =>
+        !(shape.getClassName() === "Text" && shape.isEditing) &&
+        !shape.getAttr("locked")
     );
     this.transformer.nodes(nodes);
     // A single freshly-created/short Text node's own attrs (e.g. the
@@ -365,9 +375,18 @@ export class CanvasManager {
   // it, commit a separate undo checkpoint for each one - so selecting 3
   // shapes and pressing Delete would need 3 presses of Ctrl+Z to bring
   // them all back instead of 1. One emission here means one commit.
+  // Returns whether anything was actually removed (docs/TASKS.md P2-7:
+  // a selection that's entirely locked shapes removes nothing at all -
+  // callers like ui/Shortcuts.js's Delete handler need to know that, so
+  // they don't deselect a shape Delete just declined to touch).
   removeShapes(shapes) {
     let removedAny = false;
     shapes.forEach((shape) => {
+      // Locked shapes cannot be deleted (docs/TASKS.md P2-7) until
+      // unlocked - skipped here rather than by every caller, so a
+      // Delete/cut over a mixed locked+unlocked selection still removes
+      // whichever of them aren't locked instead of doing nothing at all.
+      if (shape.getAttr("locked")) return;
       const index = this.shapes.indexOf(shape);
       if (index > -1) {
         this.shapes.splice(index, 1);
@@ -389,6 +408,7 @@ export class CanvasManager {
       this.mainLayer.batchDraw();
       window.eventBus.emit("shapeRemoved");
     }
+    return removedAny;
   }
 
   _isGroupChild(shape) {
@@ -413,12 +433,50 @@ export class CanvasManager {
   // all (see ui/shortcuts-data.js's own comment for the same exclusion
   // elsewhere) - there is nothing for a nudge to honour today.
   nudgeSelection(dx, dy) {
-    if (this.selection.size === 0) return;
-    this.selectedShapes.forEach((shape) => {
+    // Locked shapes cannot be moved (docs/TASKS.md P2-7) - filtered out
+    // rather than bailing out entirely, so nudging a mixed selection
+    // still moves whichever shapes aren't locked.
+    const shapes = this.selectedShapes.filter((s) => !s.getAttr("locked"));
+    if (shapes.length === 0) return;
+    shapes.forEach((shape) => {
       shape.position({ x: shape.x() + dx, y: shape.y() + dy });
     });
     this.updateConnections(); // also batchDraws the main layer
     window.eventBus.emit("shapeNudged");
+  }
+
+  // Ctrl/Cmd+L (docs/TASKS.md P2-7): toggles the current selection's
+  // locked state - a locked shape "cannot be moved, resized or deleted
+  // until unlocked" (PRD SEL-3), enforced by nudgeSelection/removeShapes
+  // above and _syncTransformer's own filter, plus ToolManager's
+  // _setShapePointerMode keeping draggable() in sync with it whenever
+  // the tool changes. Selecting a locked shape still works (that's the
+  // only way to reach it to unlock again - no object list or context
+  // menu exists yet, docs/TASKS.md P2-10/LAY-1, to unlock any other
+  // way), so click/drag-selection and the transformer's node-filter are
+  // the only two things this task's "skip transformer and drag" title
+  // actually needs to skip.
+  //
+  // A no-op with nothing selected. If every selected shape is already
+  // locked, this unlocks them all; otherwise it locks all of them
+  // (including any that already were) - the same "not all locked yet ->
+  // lock everything, all locked -> unlock everything" convention as
+  // design tools like Figma use for a mixed selection, rather than
+  // toggling each shape independently of the others (which would leave
+  // a single Ctrl+L on a mixed selection producing an equally mixed,
+  // confusing result).
+  toggleLockSelection() {
+    const shapes = this.selectedShapes;
+    if (shapes.length === 0) return;
+    const nextLocked = !shapes.every((s) => !!s.getAttr("locked"));
+    shapes.forEach((shape) => {
+      shape.setAttr("locked", nextLocked);
+      if (this.toolManager) this.toolManager.registerNewShape(shape);
+      else shape.draggable(!nextLocked);
+    });
+    this._syncTransformer();
+    this.mainLayer.batchDraw();
+    window.eventBus.emit("shapeLockChanged");
   }
 
   /** Copies the current selection's shapes into this app's own in-memory
@@ -433,12 +491,20 @@ export class CanvasManager {
 
   /** Copies the current selection, then removes it - one removeShapes
    * call, so (like Delete) it commits a single undo checkpoint rather
-   * than one per shape. */
+   * than one per shape. Deselecting still happens *before* removing
+   * (detaching the transformer from shapes that are about to be
+   * destroyed, rather than after), the same order this always used -
+   * only skipped entirely when nothing in the selection is actually
+   * removable (docs/TASKS.md P2-7: an entirely-locked selection - it's
+   * still been copied - should stay selected rather than being silently
+   * deselected for a delete that never happened). */
   cutSelection() {
     if (this.selection.size === 0) return;
     this.copySelection();
     const shapes = this.selectedShapes;
-    this.deselectShape();
+    if (shapes.some((shape) => !shape.getAttr("locked"))) {
+      this.deselectShape();
+    }
     this.removeShapes(shapes);
   }
 
@@ -644,6 +710,7 @@ export class CanvasManager {
             opacity: attrs.opacity ?? 1,
             name: attrs.name || "Group",
             toolType: "group",
+            locked: attrs.locked ?? false,
             draggable: true,
           });
           (attrs.children || []).forEach((childData) => {
@@ -674,6 +741,7 @@ export class CanvasManager {
             opacity: attrs.opacity ?? 1,
             name: attrs.name || "Note",
             toolType: "sticky",
+            locked: attrs.locked ?? false,
             draggable: true,
           });
           const rectNode = new Rect({
@@ -733,6 +801,7 @@ export class CanvasManager {
                 scaleY: attrs.scaleY ?? 1,
                 opacity: attrs.opacity ?? 1,
                 name: attrs.name || "",
+                locked: attrs.locked ?? false,
                 draggable: true,
                 ...(iconFile ? { iconFile } : { imageSrc }),
               });

@@ -1241,3 +1241,215 @@ describe("CanvasManager group/ungroup", () => {
     expect(canvasManager.selectedShapes).toEqual([rebuilt]);
   });
 });
+
+// docs/TASKS.md P2-7: lock/unlock.
+describe("CanvasManager.toggleLockSelection", () => {
+  let container, stage, mainLayer, transformer, canvasManager;
+
+  beforeEach(() => {
+    window.eventBus = new EventBus();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    stage = new Stage({ container, width: 800, height: 600 });
+    mainLayer = new Layer();
+    stage.add(mainLayer);
+    transformer = new Transformer();
+    mainLayer.add(transformer);
+    canvasManager = new CanvasManager(
+      stage,
+      mainLayer,
+      new Layer(),
+      transformer
+    );
+  });
+
+  afterEach(() => {
+    stage.destroy();
+    container.remove();
+  });
+
+  test("is a no-op with nothing selected", () => {
+    let events = 0;
+    window.eventBus.on("shapeLockChanged", () => {
+      events += 1;
+    });
+    canvasManager.toggleLockSelection();
+    expect(events).toBe(0);
+  });
+
+  test("locks every selected shape and makes it non-draggable, excluded from the transformer", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5, draggable: true });
+    const b = new Circle({ x: 10, y: 10, radius: 5, draggable: true });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.toggleLockSelection();
+
+    expect(a.getAttr("locked")).toBe(true);
+    expect(b.getAttr("locked")).toBe(true);
+    expect(a.draggable()).toBe(false);
+    expect(b.draggable()).toBe(false);
+    // Still selected (locking doesn't deselect - it's the only way to
+    // reach it again to unlock), just excluded from the transformer.
+    expect(canvasManager.selectedShapes).toEqual([a, b]);
+    expect(transformer.nodes()).toEqual([]);
+  });
+
+  test("toggling again on an all-locked selection unlocks it", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5, draggable: true });
+    canvasManager.addShape(a);
+    canvasManager.selectShape(a);
+    canvasManager.toggleLockSelection();
+    expect(a.getAttr("locked")).toBe(true);
+
+    canvasManager.toggleLockSelection();
+
+    expect(a.getAttr("locked")).toBe(false);
+    expect(a.draggable()).toBe(true);
+    expect(transformer.nodes()).toEqual([a]);
+  });
+
+  test("a mixed locked/unlocked selection locks everything, not toggles each independently", () => {
+    const locked = new Circle({ x: 0, y: 0, radius: 5 });
+    const unlocked = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(locked);
+    canvasManager.addShape(unlocked);
+    canvasManager.selectShape(locked);
+    canvasManager.toggleLockSelection(); // locked is now locked, unlocked is untouched
+
+    canvasManager.selection.set([locked, unlocked]);
+    canvasManager.toggleLockSelection();
+
+    expect(locked.getAttr("locked")).toBe(true);
+    expect(unlocked.getAttr("locked")).toBe(true);
+  });
+
+  test("emits shapeLockChanged once", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    let events = 0;
+    window.eventBus.on("shapeLockChanged", () => {
+      events += 1;
+    });
+    canvasManager.toggleLockSelection();
+    expect(events).toBe(1);
+  });
+
+  test("a locked shape can still be selected", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.selectShape(a);
+    canvasManager.toggleLockSelection();
+    canvasManager.deselectShape();
+
+    canvasManager.selectShape(a);
+
+    expect(canvasManager.selectedShapes).toEqual([a]);
+  });
+
+  test("removeShapes skips a locked shape but still removes the rest of the batch, and reports that something was removed", () => {
+    const locked = new Circle({ x: 0, y: 0, radius: 5 });
+    const unlocked = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(locked);
+    canvasManager.addShape(unlocked);
+    canvasManager.selectShape(locked);
+    canvasManager.toggleLockSelection();
+
+    const removedAny = canvasManager.removeShapes([locked, unlocked]);
+
+    expect(canvasManager.shapes).toEqual([locked]);
+    expect(removedAny).toBe(true);
+  });
+
+  test("removeShapes returns false, removing nothing, when every shape given is locked", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.selectShape(a);
+    canvasManager.toggleLockSelection();
+
+    const removedAny = canvasManager.removeShapes([a]);
+
+    expect(removedAny).toBe(false);
+    expect(canvasManager.shapes).toEqual([a]);
+  });
+
+  // Regression test: Shortcuts.js's Delete handler and cutSelection both
+  // used to unconditionally deselect after asking removeShapes to
+  // delete the selection, even when removeShapes silently declined
+  // because everything selected was locked - a locked shape would stay
+  // on the canvas but visibly lose its selection as if Delete/Cut had
+  // done something. Caught by an e2e test (e2e/lock.spec.js), not this
+  // unit test, but cutSelection's own behavior is covered here directly.
+  test("cutSelection leaves an entirely-locked selection selected (it still copies, but doesn't remove or deselect)", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.selectShape(a);
+    canvasManager.toggleLockSelection();
+
+    canvasManager.cutSelection();
+
+    expect(canvasManager.shapes).toEqual([a]);
+    expect(canvasManager.selectedShapes).toEqual([a]);
+    expect(canvasManager.clipboard.hasContent).toBe(true);
+  });
+
+  test("nudgeSelection skips a locked shape but still moves the rest of the selection", () => {
+    const locked = new Circle({ x: 0, y: 0, radius: 5 });
+    const unlocked = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(locked);
+    canvasManager.addShape(unlocked);
+    canvasManager.selectShape(locked);
+    canvasManager.toggleLockSelection();
+    canvasManager.selection.set([locked, unlocked]);
+
+    canvasManager.nudgeSelection(5, 0);
+
+    expect(locked.x()).toBe(0);
+    expect(unlocked.x()).toBe(15);
+  });
+
+  test("the locked flag round-trips through save/load for every explicit-allow-list shape type", () => {
+    const circle = new Circle({ x: 0, y: 0, radius: 5, locked: true });
+    canvasManager.addShape(circle);
+    expect(canvasManager.toStorageShape(circle).attrs.locked).toBe(true);
+
+    const sticky = new Group({ toolType: "sticky", id: createId() });
+    sticky.setAttr("locked", true);
+    canvasManager.addShape(sticky);
+    expect(canvasManager.toStorageShape(sticky).attrs.locked).toBe(true);
+
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.selectedShape;
+    canvasManager.toggleLockSelection();
+    expect(canvasManager.toStorageShape(group).attrs.locked).toBe(true);
+
+    canvasManager.clearCanvas();
+    canvasManager.reconstructShapes([
+      { type: "Circle", attrs: { x: 0, y: 0, radius: 5, locked: true } },
+      {
+        type: "Group",
+        attrs: {
+          x: 0,
+          y: 0,
+          name: "Group 1",
+          locked: true,
+          children: [{ type: "Circle", attrs: { x: 0, y: 0, radius: 5 } }],
+        },
+      },
+    ]);
+    expect(canvasManager.shapes.map((s) => !!s.getAttr("locked"))).toEqual([
+      true,
+      true,
+    ]);
+  });
+});

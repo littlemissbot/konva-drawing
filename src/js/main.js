@@ -350,11 +350,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.eventBus.on("shapeAdded", markDirty);
   window.eventBus.on("shapeRemoved", markDirty);
   window.eventBus.on("shapeNudged", markDirty);
+  window.eventBus.on("shapeLockChanged", markDirty);
 
   window.eventBus.on("shapeAdded", () => {
     historyManager.commit();
   });
   window.eventBus.on("shapeRemoved", () => {
+    historyManager.commit();
+  });
+  // Lock/unlock (docs/TASKS.md P2-7): a discrete, deliberate action like
+  // add/remove, not a continuous gesture like drag/nudge, so it commits
+  // immediately rather than through debouncedHistoryCommit.
+  window.eventBus.on("shapeLockChanged", () => {
     historyManager.commit();
   });
   window.eventBus.on("shapeDragEnded", debouncedHistoryCommit);

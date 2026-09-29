@@ -167,6 +167,17 @@ export function bindShortcuts({
         }
         return;
       }
+      // Ctrl/Cmd+L: toggle lock on the current selection (docs/TASKS.md
+      // P2-7/PRD Appendix B - one shortcut for both lock and unlock, see
+      // CanvasManager.toggleLockSelection's own comment for which way it
+      // goes). Always prevented, even with nothing selected (a no-op
+      // then) - Ctrl+L is the browser's "focus the address bar"
+      // shortcut, not something worth falling back to on this page.
+      if (key === "l") {
+        e.preventDefault();
+        canvasManager.toggleLockSelection();
+        return;
+      }
     }
     if (mod && e.key === "=") {
       e.preventDefault();
@@ -274,9 +285,15 @@ export function bindShortcuts({
     if ((e.key === "Delete" || e.key === "Backspace") && !typing) {
       if (canvasManager.selectedShapes.length > 0) {
         e.preventDefault();
-        canvasManager.removeShapes(canvasManager.selectedShapes);
-        canvasManager.deselectShape();
-        updatePropertiesPanel(null);
+        // Only deselect/clear the panel if something was actually
+        // removed - a selection that's entirely locked shapes
+        // (docs/TASKS.md P2-7) removes nothing, and Delete declining to
+        // touch a locked shape should leave it selected, not silently
+        // deselect it as if the delete had happened.
+        if (canvasManager.removeShapes(canvasManager.selectedShapes)) {
+          canvasManager.deselectShape();
+          updatePropertiesPanel(null);
+        }
       }
       return;
     }

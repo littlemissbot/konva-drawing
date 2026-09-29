@@ -127,8 +127,15 @@ export class ToolManager {
   // regardless of tool (CanvasManager.groupSelection's own choice - v1
   // has no way to drag one out of its group), only their listening
   // state needs to track the tool the same way top-level shapes' does.
+  //
+  // A locked top-level shape (docs/TASKS.md P2-7) stays non-draggable
+  // regardless of tool too, for the same "skip drag" reason - this is
+  // the one place besides CanvasManager.toggleLockSelection itself that
+  // sets draggable(), and it runs on every tool switch, so a lock
+  // applied while in the pen/note tool still sticks once the user
+  // switches back to the cursor tool (nothing else would re-check it).
   _setShapePointerMode(shape, cursorLike, penMode) {
-    shape.draggable(cursorLike);
+    shape.draggable(cursorLike && !shape.getAttr("locked"));
     shape.listening(!penMode);
     if (
       shape.getClassName() === "Group" &&
