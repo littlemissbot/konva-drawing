@@ -12,10 +12,10 @@
  * also lists shortcuts for tools and features this app doesn't have
  * yet at all - Hand/pan (NAV-1), Highlighter and Eraser (no such
  * tools), Arrow and Connector (no such shape/tool - Phase 3/4),
- * group/ungroup (P2-6), lock/unlock (P2-7), z-order (P2-8), grid/snap
- * toggle (no grid feature - NAV-3), zoom-to-selection (no such zoom
- * mode yet). Nudge (below) also has no grid/snap to honour yet for the
- * same reason - it always moves by a plain 1px/10px. Listing
+ * lock/unlock (P2-7), z-order (P2-8), grid/snap toggle (no grid
+ * feature - NAV-3), zoom-to-selection (no such zoom mode yet). Nudge
+ * (below) also has no grid/snap to honour yet for the same reason - it
+ * always moves by a plain 1px/10px. Listing
  * those here and in the Help dialog would tell a user a shortcut does
  * something when pressing it currently does nothing at all - worse
  * than not mentioning it. Each of those lands in this same table (and
@@ -47,6 +47,8 @@ export const SHORTCUT_GROUPS = [
       { action: "Deselect / cancel tool", keys: "Esc" },
       { action: "Nudge selection", keys: "Arrow keys" },
       { action: "Nudge selection (10px)", keys: "Shift+Arrow keys" },
+      { action: "Group selection", keys: "Mod+G" },
+      { action: "Ungroup", keys: "Mod+Shift+G" },
     ],
   },
   {

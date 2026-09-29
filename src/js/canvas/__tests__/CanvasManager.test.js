@@ -922,3 +922,322 @@ describe("CanvasManager.nudgeSelection", () => {
     expect(canvasManager.shapes[0].x()).toBe(10);
   });
 });
+
+// docs/TASKS.md P2-6: group/ungroup, double-click to enter a group.
+describe("CanvasManager group/ungroup", () => {
+  let container, stage, mainLayer, transformer, canvasManager;
+
+  beforeEach(() => {
+    window.eventBus = new EventBus();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    stage = new Stage({ container, width: 800, height: 600 });
+    mainLayer = new Layer();
+    stage.add(mainLayer);
+    transformer = new Transformer();
+    mainLayer.add(transformer);
+    canvasManager = new CanvasManager(
+      stage,
+      mainLayer,
+      new Layer(),
+      transformer
+    );
+  });
+
+  afterEach(() => {
+    stage.destroy();
+    container.remove();
+  });
+
+  function click(shape, { shiftKey = false } = {}) {
+    shape.fire("click", { evt: { shiftKey } }, true);
+  }
+  function dblclick(shape) {
+    shape.fire("dblclick", { evt: {} }, true);
+  }
+
+  test("groupSelection is a no-op with fewer than 2 shapes selected", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.selectShape(a);
+
+    canvasManager.groupSelection();
+
+    expect(canvasManager.shapes).toEqual([a]);
+  });
+
+  test("groupSelection is a no-op if any selected shape isn't a groupable type", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const sticky = new Group({ toolType: "sticky", id: createId() });
+    canvasManager.addShape(a);
+    canvasManager.addShape(sticky);
+    canvasManager.selection.set([a, sticky]);
+
+    canvasManager.groupSelection();
+
+    expect(canvasManager.shapes).toEqual([a, sticky]);
+  });
+
+  test("groups the selection into one Group, removing the originals from the top level and selecting the group", () => {
+    const a = new Circle({ x: 10, y: 10, radius: 5, name: "A" });
+    const b = new Circle({ x: 50, y: 50, radius: 5, name: "B" });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.groupSelection();
+
+    expect(canvasManager.shapes).toHaveLength(1);
+    const group = canvasManager.shapes[0];
+    expect(group.getClassName()).toBe("Group");
+    expect(group.getAttr("toolType")).toBe("group");
+    expect(
+      group
+        .getChildren()
+        .map((c) => c.getAttr("name"))
+        .sort()
+    ).toEqual(["A", "B"]);
+    expect(canvasManager.selectedShapes).toEqual([group]);
+    // Group sits at the origin with the children's own x/y unchanged -
+    // grouping must not visibly move anything.
+    expect(group.x()).toBe(0);
+    expect(group.y()).toBe(0);
+    expect(a.x()).toBe(10);
+    expect(b.x()).toBe(50);
+  });
+
+  test("inserts the new group at the lowest original zIndex of the grouped shapes, not at the end", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    const c = new Circle({ x: 20, y: 20, radius: 5 });
+    [a, b, c].forEach((s) => canvasManager.addShape(s));
+    canvasManager.selection.set([c, a]); // selected out of zIndex order
+
+    canvasManager.groupSelection();
+
+    // a and c grouped; b (originally in the middle) stays top-level and
+    // the group takes a's old position (index 0), not the end.
+    expect(canvasManager.shapes).toHaveLength(2);
+    expect(canvasManager.shapes[0].getClassName()).toBe("Group");
+    expect(canvasManager.shapes[1]).toBe(b);
+  });
+
+  test("emits shapeAdded once", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    let events = 0;
+    window.eventBus.on("shapeAdded", () => {
+      events += 1;
+    });
+    canvasManager.groupSelection();
+    expect(events).toBe(1);
+  });
+
+  test("clicking a child of a not-entered group selects the whole group", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.shapes[0];
+    canvasManager.deselectShape();
+
+    click(a);
+
+    expect(canvasManager.selectedShapes).toEqual([group]);
+  });
+
+  test("double-clicking a group enters it, so a later click on a child selects just that child", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.shapes[0];
+
+    dblclick(group);
+    click(a);
+
+    expect(canvasManager.selectedShapes).toEqual([a]);
+  });
+
+  test("selecting something outside the entered group exits it - clicking the same child again re-selects the group", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    const outsider = new Circle({ x: 100, y: 100, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.addShape(outsider);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.shapes.find((s) => s !== outsider);
+
+    dblclick(group);
+    click(a);
+    expect(canvasManager.selectedShapes).toEqual([a]);
+
+    canvasManager.selectShape(outsider); // selecting elsewhere exits the group
+    click(a);
+    expect(canvasManager.selectedShapes).toEqual([group]);
+  });
+
+  test("Escape (deselectShape) exits an entered group", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.shapes[0];
+    dblclick(group);
+
+    canvasManager.deselectShape();
+    click(a);
+
+    expect(canvasManager.selectedShapes).toEqual([group]);
+  });
+
+  test("shift-clicking a child while entered toggles just that child; while not entered, toggles the group", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.shapes[0];
+    canvasManager.deselectShape();
+
+    click(a, { shiftKey: true });
+    expect(canvasManager.selectedShapes).toEqual([group]);
+
+    canvasManager.deselectShape();
+    dblclick(group);
+    click(a, { shiftKey: true });
+    expect(canvasManager.selectedShapes).toEqual([a]);
+  });
+
+  test("Delete removes a selected child inside an entered group", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.shapes[0];
+    dblclick(group);
+    click(a);
+    expect(canvasManager.selectedShapes).toEqual([a]);
+
+    canvasManager.removeShapes([a]);
+
+    expect(group.getChildren()).toHaveLength(1);
+    expect(group.getChildren()[0]).toBe(b);
+    expect(canvasManager.shapes).toEqual([group]); // group itself untouched
+  });
+
+  test("ungroupSelection is a no-op unless exactly one real group is selected", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.selectShape(a);
+    canvasManager.ungroupSelection(); // a plain shape, not a group
+
+    expect(canvasManager.shapes).toEqual([a]);
+
+    const sticky = new Group({ toolType: "sticky", id: createId() });
+    canvasManager.addShape(sticky);
+    canvasManager.selectShape(sticky);
+    canvasManager.ungroupSelection(); // a sticky note, not this feature's group
+
+    expect(canvasManager.shapes).toEqual([a, sticky]);
+  });
+
+  test("ungroups back into independent top-level shapes at the group's own zIndex, selecting them, in one shapeRemoved emission", () => {
+    const a = new Circle({ x: 10, y: 10, radius: 5, name: "A" });
+    const b = new Circle({ x: 50, y: 50, radius: 5, name: "B" });
+    const other = new Circle({ x: 200, y: 200, radius: 5, name: "Other" });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    canvasManager.addShape(other);
+    const group = canvasManager.shapes.find((s) => s !== other);
+    canvasManager.selectShape(group);
+
+    let removedEvents = 0;
+    window.eventBus.on("shapeRemoved", () => {
+      removedEvents += 1;
+    });
+
+    canvasManager.ungroupSelection();
+
+    expect(removedEvents).toBe(1);
+    expect(canvasManager.shapes).toHaveLength(3);
+    // Ungrouped shapes land back at the group's own zIndex (index 0),
+    // not appended after `other`.
+    expect(canvasManager.shapes.map((s) => s.getAttr("name")).sort()).toEqual(
+      ["A", "B", "Other"].sort()
+    );
+    expect(canvasManager.shapes[2]).toBe(other);
+    const restored = canvasManager.shapes.filter((s) => s !== other);
+    expect(canvasManager.selectedShapes.sort()).toEqual(restored.sort());
+    restored.forEach((s) => expect(s.draggable()).toBe(true));
+  });
+
+  test("ungrouping bakes the group's own position into each child, so nothing visibly moves", () => {
+    const a = new Circle({ x: 10, y: 10, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(new Circle({ x: 50, y: 50, radius: 5 }));
+    canvasManager.selection.set([a, canvasManager.shapes[1]]);
+    canvasManager.groupSelection();
+    const group = canvasManager.shapes[0];
+    group.position({ x: 30, y: 40 }); // the group itself was dragged
+
+    canvasManager.selectShape(group);
+    canvasManager.ungroupSelection();
+
+    const restoredA = canvasManager.shapes.find((s) => s.x() === 40); // 10 + 30
+    expect(restoredA).toBeTruthy();
+    expect(restoredA.y()).toBe(50); // 10 + 40
+  });
+
+  test("a Group with children round-trips through toStorageShape -> reconstructShapes", () => {
+    const a = new Circle({ x: 10, y: 10, radius: 5, name: "A" });
+    const b = new Circle({ x: 50, y: 50, radius: 5, name: "B" });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+    canvasManager.groupSelection();
+    const group = canvasManager.shapes[0];
+
+    const stored = canvasManager.toStorageShape(group);
+    expect(stored.type).toBe("Group");
+    expect(stored.attrs.children).toHaveLength(2);
+    expect(stored.attrs.children.map((c) => c.type)).toEqual([
+      "Circle",
+      "Circle",
+    ]);
+
+    canvasManager.clearCanvas();
+    canvasManager.reconstructShapes([stored]);
+
+    expect(canvasManager.shapes).toHaveLength(1);
+    const rebuilt = canvasManager.shapes[0];
+    expect(rebuilt.getClassName()).toBe("Group");
+    expect(rebuilt.getAttr("toolType")).toBe("group");
+    const children = rebuilt.getChildren();
+    expect(children).toHaveLength(2);
+    expect(children.map((c) => c.getAttr("name")).sort()).toEqual(["A", "B"]);
+    children.forEach((c) => expect(c.draggable()).toBe(false));
+
+    // Reconstructed children get the group-aware click wiring too, not
+    // the generic top-level one - clicking one selects the group.
+    click(children[0]);
+    expect(canvasManager.selectedShapes).toEqual([rebuilt]);
+  });
+});

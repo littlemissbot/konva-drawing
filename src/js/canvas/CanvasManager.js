@@ -16,6 +16,25 @@ import { Clipboard } from "./Clipboard.js";
 // of each other.
 const CLIPBOARD_OFFSET = { x: 20, y: 20 };
 
+// Shape types groupSelection (docs/TASKS.md P2-6) will fold into a
+// group. Deliberately excludes StickyNote and Image (className "Group"/
+// "Image", so already outside this set) and a group itself (also
+// "Group") - grouping any of those would mean recursively serializing a
+// nested Group, or an Image's async Konva.Image.fromURL load, as a
+// group *child*, which reconstructShapes' Group case below does not
+// support (only the plain synchronous shape types do, via
+// _buildSimpleShape). A future task can extend this if a real need for
+// nested/image-bearing groups shows up; today's grouping needs (basic
+// shapes, freehand strokes, text) are all synchronous already.
+const GROUPABLE_CLASS_NAMES = new Set([
+  "Circle",
+  "Rect",
+  "Line",
+  "RegularPolygon",
+  "Star",
+  "Text",
+]);
+
 export class CanvasManager {
   // `transformer` is optional (existing tests construct a CanvasManager
   // without one, and nothing here breaks without it - _syncTransformer
@@ -34,6 +53,13 @@ export class CanvasManager {
     this.connections = [];
     this.textManager = null;
     this.toolManager = null;
+    // "Entered" group state (docs/TASKS.md P2-6): the Group a double-
+    // click most recently entered, so a later plain click on one of its
+    // children selects that child instead of the whole group. Cleared
+    // whenever the selection moves outside that group's own children -
+    // see selectShape/toggleSelect/selectShapes/deselectShape below.
+    this._enteredGroup = null;
+    this._groupCount = 0;
 
     this.setupEventListeners();
   }
@@ -60,6 +86,35 @@ export class CanvasManager {
   }
 
   toStorageShape(shape) {
+    if (
+      shape.getClassName() === "Group" &&
+      shape.getAttr("toolType") === "group"
+    ) {
+      // A real group (docs/TASKS.md P2-6, as opposed to the "sticky"
+      // toolType below, which is also a Group but a different feature):
+      // recurses through toStorageShape itself for each child, the same
+      // per-type logic used everywhere else - reconstructShapes' own
+      // Group case only supports rebuilding the synchronous shape types
+      // this produces (see GROUPABLE_CLASS_NAMES/_buildSimpleShape), so
+      // there is nothing here to recurse into that it can't already
+      // handle.
+      return {
+        type: "Group",
+        attrs: {
+          id: shape.id(),
+          x: shape.x(),
+          y: shape.y(),
+          rotation: shape.rotation(),
+          scaleX: shape.scaleX(),
+          scaleY: shape.scaleY(),
+          opacity: shape.opacity(),
+          name: shape.getAttr("name") || "",
+          children: shape
+            .getChildren()
+            .map((child) => this.toStorageShape(child)),
+        },
+      };
+    }
     if (
       shape.getClassName() === "Group" &&
       shape.getAttr("toolType") === "sticky"
@@ -168,6 +223,7 @@ export class CanvasManager {
   /** Replaces the whole selection with just this one shape - what a
    * plain (non-Shift) click, or creating a new shape, means. */
   selectShape(shape) {
+    this._exitGroupUnless(shape);
     this.selection.selectOnly(shape);
     this._afterSelectionChanged();
   }
@@ -176,8 +232,26 @@ export class CanvasManager {
    * there, removes it if it was - the rest of the selection is
    * untouched either way. */
   toggleSelect(shape) {
+    this._exitGroupUnless(shape);
     this.selection.toggle(shape);
     this._afterSelectionChanged();
+  }
+
+  // Clears the "entered" group (docs/TASKS.md P2-6) unless `shape` is
+  // that same group or one of its own children - i.e. unless the
+  // selection change is still "inside" the group the user double-
+  // clicked into. Selecting anything else (another top-level shape, a
+  // different group, one of a *different* group's children) exits it,
+  // the same click-away convention design tools like Figma/Illustrator
+  // use.
+  _exitGroupUnless(shape) {
+    if (
+      this._enteredGroup &&
+      shape !== this._enteredGroup &&
+      shape?.getParent?.() !== this._enteredGroup
+    ) {
+      this._enteredGroup = null;
+    }
   }
 
   /** Every shape becomes selected (Ctrl+A). */
@@ -192,6 +266,11 @@ export class CanvasManager {
    * union semantics toggleSelect gives a single shift-clicked shape,
    * just for a batch. */
   selectShapes(shapes, { additive = false } = {}) {
+    // A batch selection (marquee, Ctrl+A) always exits any entered group
+    // (docs/TASKS.md P2-6) - it inherently spans outside a single
+    // group's own children, unlike selectShape/toggleSelect's single-
+    // target case above.
+    this._enteredGroup = null;
     if (additive) {
       shapes.forEach((shape) => this.selection.add(shape));
     } else {
@@ -201,8 +280,10 @@ export class CanvasManager {
   }
 
   /** Clears the selection entirely - a plain click on empty canvas,
-   * Escape, or any single/multi delete. */
+   * Escape, or any single/multi delete. Also exits any entered group
+   * (docs/TASKS.md P2-6), the same as clicking away from it. */
   deselectShape() {
+    this._enteredGroup = null;
     if (this.selection.size > 0) {
       this.selection.clear();
       this._afterSelectionChanged();
@@ -293,12 +374,30 @@ export class CanvasManager {
         this.selection.remove(shape);
         shape.destroy();
         removedAny = true;
+      } else if (this._isGroupChild(shape)) {
+        // A selected child inside an entered group (docs/TASKS.md P2-6):
+        // not itself a top-level entry in `this.shapes` - only its
+        // parent Group is - so there is no array entry to splice; its
+        // parent Group's own children already reflects the live Konva
+        // tree, so destroying it is the whole story.
+        this.selection.remove(shape);
+        shape.destroy();
+        removedAny = true;
       }
     });
     if (removedAny) {
       this.mainLayer.batchDraw();
       window.eventBus.emit("shapeRemoved");
     }
+  }
+
+  _isGroupChild(shape) {
+    const parent = shape.getParent?.();
+    return (
+      !!parent &&
+      parent.getClassName() === "Group" &&
+      parent.getAttr("toolType") === "group"
+    );
   }
 
   // Arrow-key nudge (docs/TASKS.md P2-5): moves every selected shape by
@@ -458,6 +557,43 @@ export class CanvasManager {
     );
   }
 
+  // Builds one of the plain synchronous shape types from its stored
+  // {type, attrs} - the common construction reconstructShapes' own
+  // switch below uses for a top-level shape, and the only kind of child
+  // a real Group (docs/TASKS.md P2-6) can contain (see
+  // GROUPABLE_CLASS_NAMES). Returns the raw Konva node with no event
+  // wiring and nothing added anywhere yet - purely construction, so the
+  // caller decides whether it becomes a top-level shape or a group
+  // child, which need different event wiring (setupShapeEvents/
+  // setupTextEvents vs _setupGroupChildEvents). Returns null for any
+  // other type - StickyNote/Image/Group all need their own construction
+  // (StickyNote/Group build a whole node tree; Image loads
+  // asynchronously), so they stay directly in reconstructShapes' switch
+  // rather than trying to force them through here too.
+  _buildSimpleShape(type, attrs) {
+    switch (type) {
+      case "Circle":
+        return new Circle(attrs);
+      case "Rect":
+        return new Rect(attrs);
+      case "Line":
+        return new Line(attrs);
+      case "RegularPolygon":
+        return new RegularPolygon(attrs);
+      case "Star":
+        return new Star(attrs);
+      case "Text":
+        return new Text({
+          ...attrs,
+          draggable: true,
+          width: attrs.width || 200,
+          padding: attrs.padding || 5,
+        });
+      default:
+        return null;
+    }
+  }
+
   // `onSettled(shape | null)` (docs/TASKS.md P2-4) fires exactly once per
   // input object, in the same order for the synchronous types but not
   // necessarily for Image (its fromURL load is async, so it can settle
@@ -476,31 +612,55 @@ export class CanvasManager {
       const attrs = shapeData.attrs;
       switch (type) {
         case "Circle":
-          shape = new Circle(attrs);
-          break;
         case "Rect":
-          shape = new Rect(attrs);
-          break;
         case "Line":
-          shape = new Line(attrs);
-          break;
         case "RegularPolygon":
-          shape = new RegularPolygon(attrs);
-          break;
         case "Star":
-          shape = new Star(attrs);
+          shape = this._buildSimpleShape(type, attrs);
           break;
         case "Text":
-          shape = new Text({
-            ...attrs,
-            draggable: true,
-            width: attrs.width || 200,
-            padding: attrs.padding || 5,
-          });
+          shape = this._buildSimpleShape(type, attrs);
           if (this.textManager) {
             this.textManager.setupTextEvents(shape);
           }
           break;
+        case "Group": {
+          // A real group (docs/TASKS.md P2-6). Each child comes from
+          // _buildSimpleShape - the only types groupSelection ever put
+          // in here in the first place (GROUPABLE_CLASS_NAMES) - wired
+          // with _setupGroupChildEvents instead of the generic top-level
+          // setupShapeEvents/setupTextEvents, same as a freshly grouped
+          // shape gets. An unrecognized child type (hand-edited JSON,
+          // or a future format this version predates) is silently
+          // dropped rather than treated as fatal - the rest of the
+          // group, and the rest of the document, still loads.
+          const group = new Group({
+            id: attrs.id || createId(),
+            x: attrs.x ?? 0,
+            y: attrs.y ?? 0,
+            rotation: attrs.rotation ?? 0,
+            scaleX: attrs.scaleX ?? 1,
+            scaleY: attrs.scaleY ?? 1,
+            opacity: attrs.opacity ?? 1,
+            name: attrs.name || "Group",
+            toolType: "group",
+            draggable: true,
+          });
+          (attrs.children || []).forEach((childData) => {
+            const child = this._buildSimpleShape(
+              childData.type,
+              childData.attrs
+            );
+            if (!child) return;
+            child.draggable(false);
+            this._setupGroupChildEvents(child, group);
+            group.add(child);
+          });
+          this.setupShapeEvents(group, "Group");
+          this.addShape(group);
+          onSettled?.(group);
+          return;
+        }
         case "StickyNote": {
           const rectAttrs = attrs.rect || {};
           const textAttrs = attrs.text || {};
@@ -661,6 +821,198 @@ export class CanvasManager {
     shape.on("dragend", () => {
       window.eventBus.emit("shapeDragEnded");
     });
+
+    // Double-click "enters" a real group (docs/TASKS.md P2-6) so a later
+    // plain click on one of its children selects that child instead of
+    // the whole group - see _exitGroupUnless for how/when this clears
+    // again. Gated to toolType "group" specifically (not "sticky", the
+    // other Group-className shape this app has): a sticky note isn't
+    // the group/ungroup feature's group, and double-clicking one already
+    // means "edit its text" (TextManager.setupStickyNote's own
+    // dblclick), not "enter it". Harmless no-op for every non-group
+    // shape - Circle/Rect/etc. simply have no reason to ever match.
+    shape.on("dblclick", () => {
+      if (
+        shape.getClassName() === "Group" &&
+        shape.getAttr("toolType") === "group"
+      ) {
+        this._enteredGroup = shape;
+      }
+    });
+  }
+
+  // Wiring for a shape that has become a group's child (docs/TASKS.md
+  // P2-6), deliberately NOT the same as setupShapeEvents above: a click
+  // on a group child means "select the group" while that group isn't
+  // entered, or "select this one child" once it is - StickyNote already
+  // established this same click-redirect idea for its own fixed two-
+  // child case (TextManager.setupStickyNote); this generalizes it to an
+  // arbitrary group. `child.off()` first strips whatever wiring the
+  // shape had before (its own top-level setupShapeEvents/setupTextEvents,
+  // or an earlier group's child wiring if it's being re-grouped) so
+  // nothing double-fires.
+  _setupGroupChildEvents(child, group) {
+    child.off();
+
+    child.on("click", (e) => {
+      e.cancelBubble = true;
+      if (this._enteredGroup === group) {
+        if (e.evt?.shiftKey) {
+          window.eventBus.emit("shapeToggled", child);
+        } else {
+          window.eventBus.emit("shapeSelected", child);
+        }
+      } else if (e.evt?.shiftKey) {
+        window.eventBus.emit("shapeToggled", group);
+      } else {
+        window.eventBus.emit("shapeSelected", group);
+      }
+    });
+
+    // A grouped Text child keeps its inline-edit capability, but only
+    // once the group is entered - the first double-click enters the
+    // group (bubbling up to setupShapeEvents' own dblclick handler,
+    // since this doesn't set cancelBubble in that case), a second
+    // double-click while entered opens the editor.
+    if (child.getClassName() === "Text" && this.textManager) {
+      child.on("dblclick", (e) => {
+        if (this._enteredGroup === group) {
+          e.cancelBubble = true;
+          this.textManager.startEditing(child);
+        }
+      });
+    }
+
+    child.on("mouseover", () => {
+      this.updateTooltip(child.getAttr("name") || "", child.x(), child.y());
+    });
+    child.on("mouseout", () => {
+      this.hideTooltip();
+    });
+  }
+
+  // Ctrl/Cmd+G (docs/TASKS.md P2-6): folds every selected shape into one
+  // new Group, which then behaves as a single object - one click selects
+  // the whole thing, one drag/resize/rotate moves them all together
+  // (Konva's Transformer already does this generically for any node,
+  // group included). A no-op unless there are at least 2 selected shapes
+  // that are (a) all groupable types (GROUPABLE_CLASS_NAMES) and (b) all
+  // already top-level entries in `this.shapes` - not, say, a mix that
+  // includes another group's own child, which a shift-click across an
+  // entered group and the wider canvas can otherwise produce.
+  groupSelection() {
+    const shapes = this.selectedShapes;
+    if (shapes.length < 2) return;
+    if (shapes.some((s) => !this.shapes.includes(s))) return;
+    if (shapes.some((s) => !GROUPABLE_CLASS_NAMES.has(s.getClassName())))
+      return;
+
+    // Keep the grouped shapes' own relative stacking order, and give the
+    // new group the lowest of their zIndex positions - grouping
+    // shouldn't visibly jump the result to the front just because it's
+    // new, the same way toDocumentObjects/addShape already treat array
+    // position as the source of truth for z-order everywhere else.
+    const ordered = this.shapes.filter((s) => shapes.includes(s));
+    const insertIndex = this.shapes.indexOf(ordered[0]);
+
+    this._groupCount += 1;
+    const group = new Group({
+      id: createId(),
+      x: 0,
+      y: 0,
+      name: `Group ${this._groupCount}`,
+      toolType: "group",
+      draggable: true,
+    });
+
+    ordered.forEach((shape) => {
+      const index = this.shapes.indexOf(shape);
+      this.shapes.splice(index, 1);
+      shape.draggable(false);
+      this._setupGroupChildEvents(shape, group);
+      group.add(shape); // Konva reparents automatically
+    });
+
+    this.mainLayer.add(group);
+    this.shapes.splice(insertIndex, 0, group);
+    if (this.toolManager) this.toolManager.registerNewShape(group);
+    this.setupShapeEvents(group, "Group");
+    this.selectShape(group);
+    this.mainLayer.batchDraw();
+    // Reuses "shapeAdded" (docs/TASKS.md P2-1's removeShapes/P2-4's
+    // paste already established the pattern of reusing these two events
+    // for "the top-level shape list changed structurally", not only for
+    // a literal single new shape) - a new top-level object, the group,
+    // was added.
+    window.eventBus.emit("shapeAdded");
+  }
+
+  // Ctrl/Cmd+Shift+G (docs/TASKS.md P2-6): the inverse of groupSelection.
+  // A no-op unless the selection is exactly one real group (toolType
+  // "group" - not a sticky note, which is also a Group but isn't this
+  // feature's group). Each child's current *absolute* position/rotation/
+  // scale (which already accounts for whatever the group itself was
+  // moved/rotated/resized to) is baked into its own attrs before it's
+  // reparented to the main layer directly (identity transform), so
+  // ungrouping never visibly moves anything - the same way Illustrator/
+  // Figma's own ungroup preserves appearance rather than resetting each
+  // child back to its pre-group transform.
+  ungroupSelection() {
+    const group = this.selectedShape;
+    if (
+      this.selection.size !== 1 ||
+      !group ||
+      group.getClassName() !== "Group" ||
+      group.getAttr("toolType") !== "group"
+    ) {
+      return;
+    }
+
+    const groupIndex = this.shapes.indexOf(group);
+    // getChildren() returns the group's own live backing array, which
+    // reparenting (mainLayer.add(child) below) mutates in place - mapping
+    // over it directly would skip children as the array shrinks out from
+    // under the iteration, so a plain snapshot copy goes first.
+    const children = [...group.getChildren()];
+    const restored = children.map((child) => {
+      const absPos = child.getAbsolutePosition();
+      const absRotation = child.getAbsoluteRotation();
+      const absScale = child.getAbsoluteScale();
+
+      child.off();
+      this.mainLayer.add(child);
+      child.position(absPos);
+      child.rotation(absRotation);
+      child.scale(absScale);
+      child.draggable(true);
+
+      // Text shapes are wired via TextManager.setupTextEvents at the top
+      // level, never CanvasManager.setupShapeEvents directly - see
+      // reconstructShapes' own "Text" case for the same split.
+      if (child.getClassName() === "Text" && this.textManager) {
+        this.textManager.setupTextEvents(child);
+      } else {
+        this.setupShapeEvents(
+          child,
+          child.getAttr("name") || child.getClassName()
+        );
+      }
+      if (this.toolManager) this.toolManager.registerNewShape(child);
+      return child;
+    });
+
+    this.shapes.splice(groupIndex, 1, ...restored);
+    this.selection.clear();
+    this._enteredGroup = null;
+    group.destroy();
+    this.selectShapes(restored);
+    this.mainLayer.batchDraw();
+    // Reuses "shapeRemoved" - see groupSelection's own comment on why
+    // that's the right existing signal to reuse rather than a new event,
+    // even though former children reappear as top-level shapes in the
+    // same step: the meaningful structural change is that the group's
+    // own top-level entry is gone.
+    window.eventBus.emit("shapeRemoved");
   }
 
   // Minimal hover tooltip on the dedicated tooltipLayer (already created
@@ -751,6 +1103,7 @@ export class CanvasManager {
     // essentially every interaction, so a stale reference here is worth
     // closing now rather than waiting to see it fail.
     this.selection.clear();
+    this._enteredGroup = null; // same dangling-reference reasoning as above
     this._syncTransformer();
     this.mainLayer.batchDraw();
   }

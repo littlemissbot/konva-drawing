@@ -150,6 +150,23 @@ export function bindShortcuts({
         canvasManager.duplicateSelection();
         return;
       }
+      // Ctrl/Cmd+G / +Shift+G: group / ungroup the current selection
+      // (docs/TASKS.md P2-6). Same shiftKey-branches-on-one-key pattern
+      // as Undo/Redo above. Always prevented, even when it turns out to
+      // be a no-op (fewer than 2 groupable shapes selected for group; no
+      // single real group selected for ungroup - see
+      // CanvasManager.groupSelection/ungroupSelection's own guards) -
+      // there's no useful browser-native behavior on Ctrl+G to fall back
+      // to either way.
+      if (key === "g") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          canvasManager.ungroupSelection();
+        } else {
+          canvasManager.groupSelection();
+        }
+        return;
+      }
     }
     if (mod && e.key === "=") {
       e.preventDefault();

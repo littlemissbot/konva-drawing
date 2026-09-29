@@ -108,17 +108,34 @@ export class ToolManager {
   _syncShapePointerMode() {
     const cursorLike = this.tool === TOOL_CURSOR;
     const penMode = this.tool === TOOL_PEN;
-    this.canvasManager.shapes.forEach((shape) => {
-      shape.draggable(cursorLike);
-      shape.listening(!penMode);
-    });
+    this.canvasManager.shapes.forEach((shape) =>
+      this._setShapePointerMode(shape, cursorLike, penMode)
+    );
   }
 
   registerNewShape(shape) {
     const cursorLike = this.tool === TOOL_CURSOR;
     const penMode = this.tool === TOOL_PEN;
+    this._setShapePointerMode(shape, cursorLike, penMode);
+  }
+
+  // A real group's (docs/TASKS.md P2-6) own children are never in
+  // canvasManager.shapes (only the group itself is), so the loops above
+  // would otherwise never reach them - meaning they'd keep listening for
+  // clicks even in pen mode, unlike every other shape. draggable is
+  // deliberately NOT touched here: group children stay non-draggable
+  // regardless of tool (CanvasManager.groupSelection's own choice - v1
+  // has no way to drag one out of its group), only their listening
+  // state needs to track the tool the same way top-level shapes' does.
+  _setShapePointerMode(shape, cursorLike, penMode) {
     shape.draggable(cursorLike);
     shape.listening(!penMode);
+    if (
+      shape.getClassName() === "Group" &&
+      shape.getAttr("toolType") === "group"
+    ) {
+      shape.getChildren().forEach((child) => child.listening(!penMode));
+    }
   }
 
   _bindPenDrawing() {
