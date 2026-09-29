@@ -7,19 +7,40 @@ import { Star } from "konva/lib/shapes/Star";
 import { Group } from "konva/lib/Group";
 import Konva from "konva";
 import { createId } from "../core/Document.js";
+import { Selection } from "./Selection.js";
 
 export class CanvasManager {
-  constructor(stage, mainLayer, tooltipLayer) {
+  // `transformer` is optional (existing tests construct a CanvasManager
+  // without one, and nothing here breaks without it - _syncTransformer
+  // just no-ops) - main.js is the one real caller that passes its own
+  // Konva.Transformer, so multi-select (docs/TASKS.md P2-1) can keep it
+  // in sync with the selection itself instead of main.js reaching back
+  // in via the selectShape/deselectShape monkey-patch this replaces.
+  constructor(stage, mainLayer, tooltipLayer, transformer = null) {
     this.stage = stage;
     this.mainLayer = mainLayer;
     this.tooltipLayer = tooltipLayer;
-    this.selectedShape = null;
+    this.transformer = transformer;
+    this.selection = new Selection();
     this.shapes = [];
     this.connections = [];
     this.textManager = null;
     this.toolManager = null;
 
     this.setupEventListeners();
+  }
+
+  /** The most recently selected shape, or null - for UI that only ever
+   * cares about one shape (the properties panel's fields, single-shape
+   * paths elsewhere). See Selection.primary for what "most recent"
+   * means. Multi-aware code should use `selectedShapes` instead. */
+  get selectedShape() {
+    return this.selection.primary;
+  }
+
+  /** Every currently selected shape, as a plain array. */
+  get selectedShapes() {
+    return this.selection.shapes;
   }
 
   setTextManager(textManager) {
@@ -110,20 +131,96 @@ export class CanvasManager {
     window.eventBus.on("shapeDeselected", () => {
       this.deselectShape();
     });
+
+    // Shift-click (docs/TASKS.md P2-1): toggles one shape's membership
+    // without touching the rest of the selection. Emitted by
+    // setupShapeEvents' own click handler below, kept as a separate
+    // event from "shapeSelected" (which always replaces the whole
+    // selection with just its one shape) rather than overloading that
+    // event with a shiftKey flag, since every other "shapeSelected"
+    // emitter (shape creation in ToolManager/TextManager/SVGManager)
+    // means "this new shape is now the selection", never "add to it".
+    window.eventBus.on("shapeToggled", (shape) => {
+      this.toggleSelect(shape);
+    });
   }
 
+  /** Replaces the whole selection with just this one shape - what a
+   * plain (non-Shift) click, or creating a new shape, means. */
   selectShape(shape) {
-    this.deselectShape();
-    this.selectedShape = shape;
-    this.mainLayer.batchDraw();
-    window.eventBus.emit("propertiesUpdate", shape);
+    this.selection.selectOnly(shape);
+    this._afterSelectionChanged();
   }
 
+  /** Shift-click: adds `shape` to the selection if it wasn't already
+   * there, removes it if it was - the rest of the selection is
+   * untouched either way. */
+  toggleSelect(shape) {
+    this.selection.toggle(shape);
+    this._afterSelectionChanged();
+  }
+
+  /** Every shape becomes selected (Ctrl+A). */
+  selectAll() {
+    this.selection.set(this.shapes);
+    this._afterSelectionChanged();
+  }
+
+  /** Clears the selection entirely - a plain click on empty canvas,
+   * Escape, or any single/multi delete. */
   deselectShape() {
-    if (this.selectedShape) {
-      this.selectedShape = null;
-      this.mainLayer.batchDraw();
-      window.eventBus.emit("propertiesUpdate", null);
+    if (this.selection.size > 0) {
+      this.selection.clear();
+      this._afterSelectionChanged();
+    }
+  }
+
+  /** Common tail of every selection-changing method above: redraws,
+   * tells the properties panel what to show (still just the primary
+   * shape - a full multi-shape properties panel is P3-5's job, not
+   * this phase's), and keeps the transformer's wrapped nodes in sync
+   * with the selection itself. */
+  _afterSelectionChanged() {
+    this.mainLayer.batchDraw();
+    window.eventBus.emit("propertiesUpdate", this.selection.primary);
+    this._syncTransformer();
+  }
+
+  // Replaces main.js's old post-construction monkey-patch of
+  // selectShape/deselectShape (it needed to reach in from outside
+  // specifically to keep the transformer's wrapped nodes in sync, back
+  // when there was only ever one selected shape to hand it). Now that
+  // selection is a set, this lives here instead, next to the selection
+  // state it's keeping in sync, and every selection-changing method
+  // goes through it via _afterSelectionChanged rather than each needing
+  // its own copy of this logic.
+  _syncTransformer() {
+    if (!this.transformer) return;
+    // A Text node mid-inline-edit (TextManager sets isEditing while its
+    // textarea overlay is open) is deliberately excluded: attaching the
+    // transformer to it would visually fight with that overlay. This
+    // generalizes what was previously a single-shape special case to a
+    // filter, since a multi-select could in principle include a shape
+    // currently being edited alongside others that aren't.
+    const nodes = this.selection.shapes.filter(
+      (shape) => !(shape.getClassName() === "Text" && shape.isEditing)
+    );
+    this.transformer.nodes(nodes);
+    // A single freshly-created/short Text node's own attrs (e.g. the
+    // default 200px width) don't necessarily match its actual rendered
+    // bounds, so the transformer needs an explicit override to visually
+    // wrap the real text rather than the nominal shape size - only
+    // meaningful for exactly one selected Text node; Konva's Transformer
+    // already computes its own encompassing box correctly across
+    // multiple nodes on its own.
+    if (nodes.length === 1 && nodes[0].getClassName() === "Text") {
+      const box = nodes[0].getClientRect();
+      this.transformer.setAttrs({
+        x: box.x,
+        y: box.y,
+        width: box.width,
+        height: box.height,
+      });
     }
   }
 
@@ -140,7 +237,31 @@ export class CanvasManager {
     const index = this.shapes.indexOf(shape);
     if (index > -1) {
       this.shapes.splice(index, 1);
+      this.selection.remove(shape);
       shape.destroy();
+      this.mainLayer.batchDraw();
+      window.eventBus.emit("shapeRemoved");
+    }
+  }
+
+  // Removes every shape given in one batch - used by multi-select
+  // delete/cut (docs/TASKS.md P2-1/P2-4) instead of calling removeShape
+  // in a loop, which would emit "shapeRemoved" once per shape and, with
+  // it, commit a separate undo checkpoint for each one - so selecting 3
+  // shapes and pressing Delete would need 3 presses of Ctrl+Z to bring
+  // them all back instead of 1. One emission here means one commit.
+  removeShapes(shapes) {
+    let removedAny = false;
+    shapes.forEach((shape) => {
+      const index = this.shapes.indexOf(shape);
+      if (index > -1) {
+        this.shapes.splice(index, 1);
+        this.selection.remove(shape);
+        shape.destroy();
+        removedAny = true;
+      }
+    });
+    if (removedAny) {
       this.mainLayer.batchDraw();
       window.eventBus.emit("shapeRemoved");
     }
@@ -341,8 +462,18 @@ export class CanvasManager {
   // for its new position; pressing Ctrl+Z after such a drag undid the
   // shape's *creation* instead of just its move, deleting it outright.
   setupShapeEvents(shape, name) {
-    shape.on("click", () => {
-      window.eventBus.emit("shapeSelected", shape);
+    // Shift-click toggles this one shape's membership without touching
+    // the rest of the selection (docs/TASKS.md P2-1); a plain click
+    // replaces the whole selection with just this shape, same as
+    // before multi-select existed. Konva only fires "click" when the
+    // pointer didn't move between down and up - an actual drag never
+    // reaches here, so this can't misfire mid-drag.
+    shape.on("click", (e) => {
+      if (e.evt?.shiftKey) {
+        window.eventBus.emit("shapeToggled", shape);
+      } else {
+        window.eventBus.emit("shapeSelected", shape);
+      }
     });
 
     shape.on("mouseover", () => {
@@ -353,6 +484,20 @@ export class CanvasManager {
       this.hideTooltip();
     });
 
+    // Dragging any one shape that's part of a multi-shape selection
+    // already moves the whole selection together, for free: Konva's
+    // own Transformer (docs/TASKS.md P2-1's _syncTransformer keeps it
+    // wrapping every selected node) implements exactly this via its
+    // internal _proxyDrag - wired the moment a node is passed to
+    // transformer.nodes([...]), which _syncTransformer already does on
+    // every selection change. An earlier version of this method
+    // duplicated that logic by hand (tracking each selected shape's
+    // drag-start position and re-applying the same delta), which
+    // fought with the Transformer's own built-in handling of the exact
+    // same drag and compounded into visibly wrong movement - caught by
+    // a Playwright-driven real mouse drag in e2e/selection.spec.js
+    // landing shapes tens of pixels off from where the mouse actually
+    // went, not by reasoning about Konva's internals up front.
     shape.on("dragmove", () => {
       this.mainLayer.batchDraw();
       this.updateConnections();
@@ -443,6 +588,16 @@ export class CanvasManager {
     this.shapes.forEach((shape) => shape.destroy());
     this.shapes = [];
     this.connections = [];
+    // Previously left dangling: the selection (in the pre-multi-select
+    // days, just `selectedShape`) kept pointing at an already-destroyed
+    // node after Clear Canvas if anything was selected first - never
+    // observed as a crash only because nothing happened to read it
+    // again before the next real selection change, but multi-select
+    // code (_syncTransformer, group-drag) does read the selection on
+    // essentially every interaction, so a stale reference here is worth
+    // closing now rather than waiting to see it fail.
+    this.selection.clear();
+    this._syncTransformer();
     this.mainLayer.batchDraw();
   }
 }

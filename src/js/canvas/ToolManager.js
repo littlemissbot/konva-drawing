@@ -9,11 +9,10 @@ const TOOL_PEN = "pen";
 const TOOL_NOTE = "note";
 
 export class ToolManager {
-  constructor({ stage, canvasManager, textManager, transformer }) {
+  constructor({ stage, canvasManager, textManager }) {
     this.stage = stage;
     this.canvasManager = canvasManager;
     this.textManager = textManager;
-    this.transformer = transformer;
     this.tool = TOOL_CURSOR;
     this.isDrawing = false;
     this.currentLine = null;
@@ -36,7 +35,9 @@ export class ToolManager {
     }
     this.tool = tool;
     if (tool !== TOOL_CURSOR) {
-      this.transformer.nodes([]);
+      // deselectShape() itself keeps the transformer in sync (docs/
+      // TASKS.md P2-1's CanvasManager._syncTransformer), so nothing
+      // here needs its own reference to the transformer any more.
       this.canvasManager.deselectShape();
     }
     this.refreshInteractivity();

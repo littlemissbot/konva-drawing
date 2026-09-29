@@ -187,7 +187,7 @@ describe("runExport", () => {
     const b = new Rect({ x: 300, y: 300, width: 20, height: 20, name: "B" });
     canvasManager.addShape(a);
     canvasManager.addShape(b);
-    canvasManager.selectedShape = a;
+    canvasManager.selectShape(a);
 
     const result = await runExport({
       stage,
@@ -213,7 +213,7 @@ describe("runExport", () => {
     const b = new Rect({ x: 20, y: 20, width: 10, height: 10 });
     canvasManager.addShape(a);
     canvasManager.addShape(b);
-    canvasManager.selectedShape = a;
+    canvasManager.selectShape(a);
 
     // exportRaster reports invalid-format as a normal {ok: false}
     // result rather than throwing, so this just needs to resolve
@@ -260,7 +260,7 @@ describe("runExport", () => {
     const b = new Rect({ x: 20, y: 20, width: 10, height: 10 });
     canvasManager.addShape(a);
     canvasManager.addShape(b);
-    canvasManager.selectedShape = a;
+    canvasManager.selectShape(a);
 
     const promise = runExport({
       stage,

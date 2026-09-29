@@ -131,31 +131,18 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   mainLayer.add(transformer);
 
-  // Initialize managers
-  const canvasManager = new CanvasManager(stage, mainLayer, tooltipLayer);
-  const origSelectShape = canvasManager.selectShape.bind(canvasManager);
-  const origDeselectShape = canvasManager.deselectShape.bind(canvasManager);
-  canvasManager.selectShape = function (shape) {
-    origSelectShape(shape);
-    // Don't attach transformer to text shapes when they are being edited
-    if (!(shape.getClassName() === "Text" && shape.isEditing)) {
-      transformer.nodes([shape]);
-      // For text shapes, set the transformer to use the shape's current size
-      if (shape.getClassName() === "Text") {
-        const box = shape.getClientRect();
-        transformer.setAttrs({
-          x: box.x,
-          y: box.y,
-          width: box.width,
-          height: box.height,
-        });
-      }
-    }
-  };
-  canvasManager.deselectShape = function () {
-    origDeselectShape();
-    transformer.nodes([]);
-  };
+  // Initialize managers. The transformer is passed in (rather than
+  // monkey-patched onto selectShape/deselectShape from out here, as
+  // before docs/TASKS.md P2-1) so CanvasManager can keep it in sync
+  // with a multi-shape selection itself - see CanvasManager's own
+  // _syncTransformer for the text-mid-edit and single-Text-node
+  // special cases this used to handle right here.
+  const canvasManager = new CanvasManager(
+    stage,
+    mainLayer,
+    tooltipLayer,
+    transformer
+  );
 
   const shapeManager = new ShapeManager(canvasManager);
   // PropertyManager is not instantiated: nothing in this app calls it
@@ -172,7 +159,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     stage,
     canvasManager,
     textManager,
-    transformer,
   });
   canvasManager.setToolManager(toolManager);
 
@@ -894,7 +880,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     historyManager,
     canvasManager,
     toolManager,
-    transformer,
     mainLayer,
     zoomIn,
     zoomOut,
@@ -1057,8 +1042,15 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     });
     deleteBtn.addEventListener("click", () => {
-      if (window.canvasManager.selectedShape) {
-        window.canvasManager.removeShape(window.canvasManager.selectedShape);
+      // Deletes the whole selection, not just the properties panel's
+      // own single displayed shape, for the same reason the Delete key
+      // does (see ui/Shortcuts.js) - this button and that key both mean
+      // "delete what's selected", and a multi-selection is still all
+      // "selected" even though this panel only ever shows one shape's
+      // fields at a time (docs/TASKS.md P3-5 is where a real multi-edit
+      // panel would live, not here).
+      if (window.canvasManager.selectedShapes.length > 0) {
+        window.canvasManager.removeShapes(window.canvasManager.selectedShapes);
         window.canvasManager.deselectShape();
         updatePropertiesPanel(null);
       }

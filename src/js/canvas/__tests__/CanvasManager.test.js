@@ -4,6 +4,7 @@ import { Circle } from "konva/lib/shapes/Circle";
 import { Rect } from "konva/lib/shapes/Rect";
 import { Image as KonvaImage } from "konva/lib/shapes/Image";
 import { Group } from "konva/lib/Group";
+import { Transformer } from "konva/lib/shapes/Transformer";
 import { CanvasManager } from "../CanvasManager.js";
 import { EventBus } from "../../core/EventBus.js";
 import {
@@ -400,5 +401,172 @@ describe("CanvasManager <-> core/Document.js bridge", () => {
         "B",
       ]);
     });
+  });
+});
+
+// docs/TASKS.md P2-1: multi-select.
+describe("CanvasManager multi-select", () => {
+  let container, stage, mainLayer, transformer, canvasManager;
+
+  beforeEach(() => {
+    window.eventBus = new EventBus();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    stage = new Stage({ container, width: 800, height: 600 });
+    mainLayer = new Layer();
+    stage.add(mainLayer);
+    transformer = new Transformer();
+    mainLayer.add(transformer);
+    canvasManager = new CanvasManager(
+      stage,
+      mainLayer,
+      new Layer(),
+      transformer
+    );
+  });
+
+  afterEach(() => {
+    stage.destroy();
+    container.remove();
+  });
+
+  function click(shape, { shiftKey = false } = {}) {
+    shape.fire("click", { evt: { shiftKey } }, true);
+  }
+
+  test("selectShape replaces the whole selection with just one shape", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 20, y: 20, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+
+    canvasManager.selectShape(a);
+    canvasManager.selectShape(b);
+
+    expect(canvasManager.selectedShapes).toEqual([b]);
+    expect(canvasManager.selectedShape).toBe(b);
+  });
+
+  test("shift-clicking an unselected shape adds it without deselecting the rest", () => {
+    const a = new Rect({ x: 0, y: 0, width: 10, height: 10 });
+    const b = new Rect({ x: 20, y: 20, width: 10, height: 10 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.setupShapeEvents(a, "A");
+    canvasManager.setupShapeEvents(b, "B");
+
+    click(a);
+    click(b, { shiftKey: true });
+
+    expect(canvasManager.selectedShapes.sort()).toEqual([a, b].sort());
+  });
+
+  test("shift-clicking an already-selected shape removes just that one", () => {
+    const a = new Rect({ x: 0, y: 0, width: 10, height: 10 });
+    const b = new Rect({ x: 20, y: 20, width: 10, height: 10 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.setupShapeEvents(a, "A");
+    canvasManager.setupShapeEvents(b, "B");
+    canvasManager.selectAll();
+
+    click(a, { shiftKey: true });
+
+    expect(canvasManager.selectedShapes).toEqual([b]);
+  });
+
+  test("a plain click (no Shift) on one of several selected shapes collapses the selection to just that shape", () => {
+    const a = new Rect({ x: 0, y: 0, width: 10, height: 10 });
+    const b = new Rect({ x: 20, y: 20, width: 10, height: 10 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.setupShapeEvents(a, "A");
+    canvasManager.setupShapeEvents(b, "B");
+    canvasManager.selectAll();
+
+    click(a);
+
+    expect(canvasManager.selectedShapes).toEqual([a]);
+  });
+
+  test("selectAll selects every shape on the canvas", () => {
+    [1, 2, 3].forEach((i) =>
+      canvasManager.addShape(new Circle({ x: i, y: i, radius: 5 }))
+    );
+    canvasManager.selectAll();
+    expect(canvasManager.selectedShapes).toHaveLength(3);
+  });
+
+  test("deselectShape clears the whole selection, not just the primary", () => {
+    canvasManager.addShape(new Circle({ x: 0, y: 0, radius: 5 }));
+    canvasManager.addShape(new Circle({ x: 20, y: 20, radius: 5 }));
+    canvasManager.selectAll();
+
+    canvasManager.deselectShape();
+
+    expect(canvasManager.selectedShapes).toEqual([]);
+    expect(canvasManager.selectedShape).toBeNull();
+  });
+
+  test("the transformer wraps every selected shape", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 20, y: 20, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+
+    canvasManager.selectAll();
+
+    expect(transformer.nodes().sort()).toEqual([a, b].sort());
+  });
+
+  test("removeShapes deletes every given shape and emits shapeRemoved once", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 20, y: 20, radius: 5 });
+    const c = new Circle({ x: 40, y: 40, radius: 5 });
+    [a, b, c].forEach((s) => canvasManager.addShape(s));
+    canvasManager.selection.set([a, b]);
+
+    let removedEvents = 0;
+    window.eventBus.on("shapeRemoved", () => {
+      removedEvents += 1;
+    });
+
+    canvasManager.removeShapes([a, b]);
+
+    expect(canvasManager.shapes).toEqual([c]);
+    expect(removedEvents).toBe(1);
+    // Removed shapes drop out of the selection too, not left dangling.
+    expect(canvasManager.selectedShapes).toEqual([]);
+  });
+
+  // Dragging one shape in a multi-selection moving the rest of the
+  // selection together is NOT implemented in CanvasManager itself - an
+  // earlier version of this file hand-rolled that (tracking each
+  // selected shape's drag-start position and reapplying the delta) and
+  // had its own pair of unit tests for it, using synthetic
+  // shape.fire("dragstart"/"dragmove") calls. That custom logic turned
+  // out to duplicate a feature Konva's own Transformer already
+  // implements internally (_proxyDrag, wired automatically the moment
+  // transformer.nodes([...]) includes more than one node - which
+  // _syncTransformer above already does on every selection change) and
+  // fought with it, compounding into visibly wrong movement under a
+  // real mouse drag - a bug a synthetic-event unit test could not have
+  // caught (Konva's real drag-and-drop registration, which
+  // Transformer's own proxying depends on, needs actual pointer
+  // events, not directly fired "dragmove"). It's now covered for real
+  // in e2e/selection.spec.js's "dragging one selected shape moves the
+  // rest of the selection together", against an actual browser mouse
+  // drag; "the transformer wraps every selected shape" above is what
+  // makes that behavior possible in the first place.
+
+  test("clearCanvas clears the selection along with the shapes", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.selectShape(a);
+
+    canvasManager.clearCanvas();
+
+    expect(canvasManager.selectedShapes).toEqual([]);
+    expect(transformer.nodes()).toEqual([]);
   });
 });

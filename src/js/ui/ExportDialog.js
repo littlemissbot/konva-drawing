@@ -54,20 +54,23 @@ export function gatherExportOptions({
   };
 }
 
-/** Runs `fn()` with every shape except `keepVisible` temporarily
- * hidden, restoring every shape's original visibility afterward
- * regardless of whether `fn` throws/rejects or resolves normally. A
- * no-op (still runs and returns `fn()`) when `keepVisible` is falsy.
- * `fn`'s result is always awaited (harmless for exportRaster's plain
- * synchronous return, necessary for exportPdf's - see runExport below):
- * without that, the `finally` would fire the instant `fn()` returns a
- * *pending* Promise rather than once it actually settles, restoring
- * every shape's visibility while exportPdf is still mid-flight and
- * before it reaches its own visibility-sensitive collectTextLayer()
- * call, defeating selectionOnly for PDF exports specifically. */
+/** Runs `fn()` with every shape except those in `keepVisible` (an
+ * array, possibly more than one since docs/TASKS.md P2-1's multi-select)
+ * temporarily hidden, restoring every shape's original visibility
+ * afterward regardless of whether `fn` throws/rejects or resolves
+ * normally. A no-op (still runs and returns `fn()`) when `keepVisible`
+ * is empty/falsy. `fn`'s result is always awaited (harmless for
+ * exportRaster's plain synchronous return, necessary for exportPdf's -
+ * see runExport below): without that, the `finally` would fire the
+ * instant `fn()` returns a *pending* Promise rather than once it
+ * actually settles, restoring every shape's visibility while exportPdf
+ * is still mid-flight and before it reaches its own visibility-
+ * sensitive collectTextLayer() call, defeating selectionOnly for PDF
+ * exports specifically. */
 async function withOnlyVisible(shapes, keepVisible, fn) {
-  if (!keepVisible) return fn();
-  const hidden = shapes.filter((s) => s !== keepVisible && s.visible());
+  if (!keepVisible || keepVisible.length === 0) return fn();
+  const keep = new Set(keepVisible);
+  const hidden = shapes.filter((s) => !keep.has(s) && s.visible());
   hidden.forEach((s) => s.visible(false));
   try {
     return await fn();
@@ -85,9 +88,8 @@ async function withOnlyVisible(shapes, keepVisible, fn) {
  * reflect the selection alone, and every shape's visibility is restored
  * before this resolves.
  *
- * "Selection" here is always CanvasManager's single `selectedShape`:
- * Phase 1 has no multi-select yet (docs/TASKS.md P2-1), so there is
- * nothing more to select from.
+ * "Selection" is CanvasManager's own selectedShapes (docs/TASKS.md
+ * P2-1's multi-select set) - possibly more than one shape.
  *
  * @param {object} args
  * @param {import("konva/lib/Stage").Stage} args.stage
@@ -106,7 +108,7 @@ export async function runExport({ stage, canvasManager, options }) {
     selectableText,
   } = options;
 
-  const keepVisible = selectionOnly ? canvasManager.selectedShape : null;
+  const keepVisible = selectionOnly ? canvasManager.selectedShapes : null;
 
   return withOnlyVisible(canvasManager.shapes, keepVisible, () => {
     if (format === "pdf") {

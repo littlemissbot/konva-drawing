@@ -11,7 +11,6 @@
  * @param {import("../core/HistoryManager.js").HistoryManager} deps.historyManager
  * @param {import("../canvas/CanvasManager.js").CanvasManager} deps.canvasManager
  * @param {import("../canvas/ToolManager.js").ToolManager} deps.toolManager
- * @param {import("konva/lib/shapes/Transformer").Transformer} deps.transformer
  * @param {import("konva/lib/Layer").Layer} deps.mainLayer
  * @param {() => void} deps.zoomIn
  * @param {() => void} deps.zoomOut
@@ -32,7 +31,6 @@ export function bindShortcuts({
   historyManager,
   canvasManager,
   toolManager,
-  transformer,
   mainLayer,
   zoomIn,
   zoomOut,
@@ -95,6 +93,14 @@ export function bindShortcuts({
         printCanvas?.();
         return;
       }
+      // Ctrl/Cmd+A: select every shape (docs/TASKS.md P2-1). Always
+      // prevented so the browser's own "select all page text" never
+      // fires instead.
+      if (key === "a") {
+        e.preventDefault();
+        canvasManager.selectAll();
+        return;
+      }
     }
     if (mod && e.key === "=") {
       e.preventDefault();
@@ -108,30 +114,35 @@ export function bindShortcuts({
       return;
     }
 
-    // Delete/Backspace removes the current selection. Suppressed while
-    // typing in an input/textarea/select (e.g. the properties panel's
-    // Name field) so correcting a typo never deletes the shape.
+    // Delete/Backspace removes the whole current selection (one shape
+    // or several - docs/TASKS.md P2-1), via removeShapes so a
+    // multi-delete commits one undo checkpoint, not one per shape (see
+    // CanvasManager.removeShapes' own comment). Suppressed while typing
+    // in an input/textarea/select (e.g. the properties panel's Name
+    // field) so correcting a typo never deletes the shape.
     if (
       (e.key === "Delete" || e.key === "Backspace") &&
       !e.target.closest("input, textarea, select")
     ) {
-      if (canvasManager.selectedShape) {
+      if (canvasManager.selectedShapes.length > 0) {
         e.preventDefault();
-        canvasManager.removeShape(canvasManager.selectedShape);
+        canvasManager.removeShapes(canvasManager.selectedShapes);
         canvasManager.deselectShape();
         updatePropertiesPanel(null);
       }
       return;
     }
 
-    // Escape deselects the current shape and returns to the select tool.
-    // Also suppressed while typing; the inline text editor handles its
-    // own Escape to cancel editing (see TextManager.startEditing).
+    // Escape deselects the current selection and returns to the select
+    // tool. Also suppressed while typing; the inline text editor
+    // handles its own Escape to cancel editing (see
+    // TextManager.startEditing). deselectShape() itself keeps the
+    // transformer's wrapped nodes in sync (CanvasManager's own
+    // _syncTransformer), so nothing here needs to touch it directly.
     if (e.key === "Escape" && !e.target.closest("input, textarea, select")) {
       e.preventDefault();
       toolManager.setTool("cursor");
       canvasManager.deselectShape();
-      transformer.nodes([]);
       updatePropertiesPanel(null);
       mainLayer.batchDraw();
     }
