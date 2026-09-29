@@ -563,6 +563,173 @@ export class CanvasManager {
     window.eventBus.emit("shapeZOrderChanged");
   }
 
+  // Align/distribute (docs/TASKS.md P2-9): all eight relative to the
+  // selection's own overall bounding box (the union of every selected
+  // shape's client rect), not a single "anchor" shape - PRD SEL-5 names
+  // no anchor, and this is the default every mainstream design tool uses
+  // once 2+ objects are selected. A no-op with fewer than 2 selected
+  // shapes. A locked shape (docs/TASKS.md P2-7 - "cannot be moved")
+  // still counts toward the bounding box/spacing math (it's still
+  // visually part of the selection), it just never actually moves -
+  // same "compute for everyone, apply to the unlocked ones" pattern
+  // nudgeSelection/toggleLockSelection already established. Scope
+  // decision: no keyboard shortcut exists for any of these (PRD's own
+  // Appendix B has none - SEL-6 puts align/distribute in the context
+  // menu only, which doesn't exist yet either - docs/TASKS.md P2-10);
+  // these are reachable today only via canvasManager.alignLeft() etc.
+  // directly (e.g. from a test, or the console), same as every method on
+  // this class - P2-10 is what gives them a real UI entry point.
+
+  alignLeft() {
+    this._alignSelection((box, bounds) => ({ dx: bounds.left - box.x, dy: 0 }));
+  }
+
+  alignCenter() {
+    this._alignSelection((box, bounds) => ({
+      dx: bounds.left + bounds.width / 2 - (box.x + box.width / 2),
+      dy: 0,
+    }));
+  }
+
+  alignRight() {
+    this._alignSelection((box, bounds) => ({
+      dx: bounds.right - (box.x + box.width),
+      dy: 0,
+    }));
+  }
+
+  alignTop() {
+    this._alignSelection((box, bounds) => ({ dx: 0, dy: bounds.top - box.y }));
+  }
+
+  alignMiddle() {
+    this._alignSelection((box, bounds) => ({
+      dx: 0,
+      dy: bounds.top + bounds.height / 2 - (box.y + box.height / 2),
+    }));
+  }
+
+  alignBottom() {
+    this._alignSelection((box, bounds) => ({
+      dx: 0,
+      dy: bounds.bottom - (box.y + box.height),
+    }));
+  }
+
+  /** Distributes horizontal spacing evenly: the leftmost and rightmost
+   * shapes stay put (they define the span), every shape between them is
+   * repositioned so the gaps between edges are equal. */
+  distributeHorizontally() {
+    this._distributeSelection(
+      (box) => box.x,
+      (box) => box.width,
+      (shape, delta) => shape.x(shape.x() + delta)
+    );
+  }
+
+  /** The vertical mirror of distributeHorizontally. */
+  distributeVertically() {
+    this._distributeSelection(
+      (box) => box.y,
+      (box) => box.height,
+      (shape, delta) => shape.y(shape.y() + delta)
+    );
+  }
+
+  // The union of every given shape's absolute client rect (Konva
+  // already accounts for rotation/scale/nested-group transforms in
+  // getClientRect - the same call ToolManager's marquee select entries
+  // already use for the same reason).
+  _selectionBounds(shapes) {
+    const boxes = shapes.map((s) =>
+      s.getClientRect({ relativeTo: this.stage })
+    );
+    const left = Math.min(...boxes.map((b) => b.x));
+    const top = Math.min(...boxes.map((b) => b.y));
+    const right = Math.max(...boxes.map((b) => b.x + b.width));
+    const bottom = Math.max(...boxes.map((b) => b.y + b.height));
+    return {
+      left,
+      top,
+      right,
+      bottom,
+      width: right - left,
+      height: bottom - top,
+    };
+  }
+
+  // Shared tail for the six align methods above: `targetFor(box, bounds)`
+  // returns the {dx, dy} each shape's own client rect needs to reach its
+  // target edge/center of the overall selection bounds. Translating a
+  // shape's own x()/y() by that same delta moves its client rect by
+  // exactly that delta too, regardless of the shape's own rotation/scale
+  // (a pure translation commutes with whatever transform the shape
+  // itself already has - only rotating/scaling the shape itself would
+  // not).
+  _alignSelection(targetFor) {
+    const shapes = this.selectedShapes;
+    if (shapes.length < 2) return;
+    const bounds = this._selectionBounds(shapes);
+    let movedAny = false;
+    shapes.forEach((shape) => {
+      if (shape.getAttr("locked")) return;
+      const box = shape.getClientRect({ relativeTo: this.stage });
+      const { dx, dy } = targetFor(box, bounds);
+      if (dx || dy) {
+        shape.position({ x: shape.x() + dx, y: shape.y() + dy });
+        movedAny = true;
+      }
+    });
+    if (!movedAny) return;
+    this.updateConnections(); // also batchDraws the main layer
+    window.eventBus.emit("shapeAligned");
+  }
+
+  // Shared tail for distributeHorizontally/Vertically. `getPos`/`getSize`
+  // read the relevant axis off a client rect; `applyDelta(shape, delta)`
+  // moves a shape along that same axis. Sorts by current position along
+  // the axis, then walks the shapes between the first and last (which
+  // stay fixed) placing each one gap-width after the previous shape's
+  // trailing edge, where gap-width is whatever's needed to make every
+  // gap equal across the full span. A locked shape's own *target* slot
+  // still advances the running cursor (keeping the rest of the layout's
+  // spacing internally consistent), it just never actually gets moved
+  // there itself.
+  _distributeSelection(getPos, getSize, applyDelta) {
+    const shapes = this.selectedShapes;
+    if (shapes.length < 2) return;
+    const withBoxes = shapes
+      .map((shape) => ({
+        shape,
+        box: shape.getClientRect({ relativeTo: this.stage }),
+      }))
+      .sort((a, b) => getPos(a.box) - getPos(b.box));
+
+    const gapCount = withBoxes.length - 1;
+    if (gapCount < 1) return;
+    const first = withBoxes[0];
+    const last = withBoxes[withBoxes.length - 1];
+    const totalSpan = getPos(last.box) + getSize(last.box) - getPos(first.box);
+    const totalSize = withBoxes.reduce((sum, { box }) => sum + getSize(box), 0);
+    const gap = (totalSpan - totalSize) / gapCount;
+
+    let cursor = getPos(first.box) + getSize(first.box);
+    let movedAny = false;
+    for (let i = 1; i < withBoxes.length - 1; i++) {
+      const { shape, box } = withBoxes[i];
+      const targetPos = cursor + gap;
+      const delta = targetPos - getPos(box);
+      if (!shape.getAttr("locked") && delta) {
+        applyDelta(shape, delta);
+        movedAny = true;
+      }
+      cursor = targetPos + getSize(box);
+    }
+    if (!movedAny) return;
+    this.updateConnections(); // also batchDraws the main layer
+    window.eventBus.emit("shapeAligned");
+  }
+
   /** Copies the current selection's shapes into this app's own in-memory
    * clipboard (see Clipboard.js for why it's not the OS clipboard). A
    * no-op with nothing selected - it does not clear a previous copy. */

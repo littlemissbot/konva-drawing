@@ -1594,3 +1594,255 @@ describe("CanvasManager z-order", () => {
     expect(events).toBe(1);
   });
 });
+
+// docs/TASKS.md P2-9: align and distribute.
+describe("CanvasManager align/distribute", () => {
+  let container, stage, mainLayer, canvasManager;
+
+  beforeEach(() => {
+    window.eventBus = new EventBus();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    stage = new Stage({ container, width: 800, height: 600 });
+    mainLayer = new Layer();
+    stage.add(mainLayer);
+    canvasManager = new CanvasManager(stage, mainLayer, new Layer());
+  });
+
+  afterEach(() => {
+    stage.destroy();
+    container.remove();
+  });
+
+  const ALIGN_METHODS = [
+    "alignLeft",
+    "alignCenter",
+    "alignRight",
+    "alignTop",
+    "alignMiddle",
+    "alignBottom",
+    "distributeHorizontally",
+    "distributeVertically",
+  ];
+
+  test.each(ALIGN_METHODS)(
+    "%s is a no-op with fewer than 2 shapes selected",
+    (method) => {
+      const a = new Rect({ x: 0, y: 0, width: 10, height: 10 });
+      canvasManager.addShape(a);
+      canvasManager.selectShape(a);
+
+      let events = 0;
+      window.eventBus.on("shapeAligned", () => {
+        events += 1;
+      });
+      canvasManager[method]();
+
+      expect(events).toBe(0);
+      expect(a.x()).toBe(0);
+      expect(a.y()).toBe(0);
+    }
+  );
+
+  test("alignLeft moves every shape's left edge to the selection's leftmost edge", () => {
+    const a = new Rect({ x: 0, y: 0, width: 50, height: 50 });
+    const b = new Rect({ x: 100, y: 0, width: 30, height: 30 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.alignLeft();
+
+    expect(a.x()).toBe(0);
+    expect(b.x()).toBe(0);
+  });
+
+  test("alignCenter aligns every shape's horizontal center to the selection bounds' center", () => {
+    const a = new Rect({ x: 0, y: 0, width: 50, height: 50 }); // center 25
+    const b = new Rect({ x: 100, y: 0, width: 30, height: 30 }); // center 115
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.alignCenter();
+
+    // bounds: left 0, right 130, center 65
+    expect(a.x() + a.width() / 2).toBe(65);
+    expect(b.x() + b.width() / 2).toBe(65);
+  });
+
+  test("alignRight moves every shape's right edge to the selection's rightmost edge", () => {
+    const a = new Rect({ x: 0, y: 0, width: 50, height: 50 }); // right 50
+    const b = new Rect({ x: 100, y: 0, width: 30, height: 30 }); // right 130
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.alignRight();
+
+    expect(a.x() + a.width()).toBe(130);
+    expect(b.x() + b.width()).toBe(130);
+  });
+
+  test("alignTop moves every shape's top edge to the selection's topmost edge", () => {
+    const a = new Rect({ x: 0, y: 0, width: 50, height: 50 });
+    const b = new Rect({ x: 0, y: 100, width: 30, height: 30 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.alignTop();
+
+    expect(a.y()).toBe(0);
+    expect(b.y()).toBe(0);
+  });
+
+  test("alignMiddle aligns every shape's vertical center to the selection bounds' center", () => {
+    const a = new Rect({ x: 0, y: 0, width: 50, height: 50 }); // center 25
+    const b = new Rect({ x: 0, y: 100, width: 30, height: 30 }); // center 115
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.alignMiddle();
+
+    expect(a.y() + a.height() / 2).toBe(65);
+    expect(b.y() + b.height() / 2).toBe(65);
+  });
+
+  test("alignBottom moves every shape's bottom edge to the selection's bottommost edge", () => {
+    const a = new Rect({ x: 0, y: 0, width: 50, height: 50 }); // bottom 50
+    const b = new Rect({ x: 0, y: 100, width: 30, height: 30 }); // bottom 130
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.alignBottom();
+
+    expect(a.y() + a.height()).toBe(130);
+    expect(b.y() + b.height()).toBe(130);
+  });
+
+  test("a locked shape's bounds still count toward alignment, but it never moves itself", () => {
+    const locked = new Rect({ x: 100, y: 0, width: 30, height: 30 });
+    const other = new Rect({ x: 0, y: 0, width: 50, height: 50 });
+    canvasManager.addShape(locked);
+    canvasManager.addShape(other);
+    canvasManager.selectShape(locked);
+    canvasManager.toggleLockSelection();
+    canvasManager.selection.set([locked, other]);
+
+    canvasManager.alignLeft();
+
+    // Bounds are still [0, 130) (locked shape's own box counted), so
+    // `other` aligns to 0 - but `locked` itself stays at x=100.
+    expect(locked.x()).toBe(100);
+    expect(other.x()).toBe(0);
+  });
+
+  test("emits shapeAligned once for a real move, and not at all when nothing actually moves", () => {
+    const a = new Rect({ x: 0, y: 0, width: 50, height: 50 });
+    const b = new Rect({ x: 100, y: 0, width: 30, height: 30 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    let events = 0;
+    window.eventBus.on("shapeAligned", () => {
+      events += 1;
+    });
+
+    canvasManager.alignLeft();
+    expect(events).toBe(1);
+
+    canvasManager.alignLeft(); // already aligned - nothing left to move
+    expect(events).toBe(1);
+  });
+
+  test("distributeHorizontally evenly spaces the gaps between shapes, leaving the leftmost and rightmost in place", () => {
+    const a = new Rect({ x: 0, y: 0, width: 20, height: 10 });
+    const b = new Rect({ x: 50, y: 0, width: 10, height: 10 });
+    const c = new Rect({ x: 200, y: 0, width: 20, height: 10 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.addShape(c);
+    canvasManager.selection.set([a, b, c]);
+
+    canvasManager.distributeHorizontally();
+
+    expect(a.x()).toBe(0); // leftmost - unchanged
+    expect(c.x()).toBe(200); // rightmost - unchanged
+    expect(b.x()).toBe(105); // gap of 85 on each side
+    // Gap from a's right edge to b's left edge equals the gap from b's
+    // right edge to c's left edge.
+    const gap1 = b.x() - (a.x() + a.width());
+    const gap2 = c.x() - (b.x() + b.width());
+    expect(gap1).toBeCloseTo(gap2, 5);
+  });
+
+  test("distributeHorizontally spaces multiple shapes between the endpoints evenly", () => {
+    const a = new Rect({ x: 0, y: 0, width: 10, height: 10 });
+    const b = new Rect({ x: 20, y: 0, width: 10, height: 10 });
+    const c = new Rect({ x: 40, y: 0, width: 10, height: 10 });
+    const d = new Rect({ x: 100, y: 0, width: 10, height: 10 });
+    [a, b, c, d].forEach((s) => canvasManager.addShape(s));
+    canvasManager.selection.set([a, b, c, d]);
+
+    canvasManager.distributeHorizontally();
+
+    expect(a.x()).toBe(0);
+    expect(d.x()).toBe(100);
+    const gap1 = b.x() - (a.x() + a.width());
+    const gap2 = c.x() - (b.x() + b.width());
+    const gap3 = d.x() - (c.x() + c.width());
+    expect(gap1).toBeCloseTo(gap2, 5);
+    expect(gap2).toBeCloseTo(gap3, 5);
+  });
+
+  test("distributeVertically evenly spaces the gaps between shapes, leaving the topmost and bottommost in place", () => {
+    const a = new Rect({ x: 0, y: 0, width: 10, height: 20 });
+    const b = new Rect({ x: 0, y: 50, width: 10, height: 10 });
+    const c = new Rect({ x: 0, y: 200, width: 10, height: 20 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.addShape(c);
+    canvasManager.selection.set([a, b, c]);
+
+    canvasManager.distributeVertically();
+
+    expect(a.y()).toBe(0);
+    expect(c.y()).toBe(200);
+    expect(b.y()).toBe(105);
+  });
+
+  test("distributeHorizontally with only 2 shapes changes nothing (they're already the two endpoints)", () => {
+    const a = new Rect({ x: 0, y: 0, width: 10, height: 10 });
+    const b = new Rect({ x: 100, y: 0, width: 10, height: 10 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.distributeHorizontally();
+
+    expect(a.x()).toBe(0);
+    expect(b.x()).toBe(100);
+  });
+
+  test("a locked middle shape in a distribute never moves, even though it counts toward the spacing", () => {
+    const a = new Rect({ x: 0, y: 0, width: 10, height: 10 });
+    const locked = new Rect({ x: 20, y: 0, width: 10, height: 10 });
+    const c = new Rect({ x: 200, y: 0, width: 10, height: 10 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(locked);
+    canvasManager.addShape(c);
+    canvasManager.selectShape(locked);
+    canvasManager.toggleLockSelection();
+    canvasManager.selection.set([a, locked, c]);
+
+    canvasManager.distributeHorizontally();
+
+    expect(locked.x()).toBe(20); // never moved
+    expect(a.x()).toBe(0);
+    expect(c.x()).toBe(200);
+  });
+});

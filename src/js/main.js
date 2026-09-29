@@ -352,6 +352,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.eventBus.on("shapeNudged", markDirty);
   window.eventBus.on("shapeLockChanged", markDirty);
   window.eventBus.on("shapeZOrderChanged", markDirty);
+  window.eventBus.on("shapeAligned", markDirty);
 
   window.eventBus.on("shapeAdded", () => {
     historyManager.commit();
@@ -359,14 +360,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.eventBus.on("shapeRemoved", () => {
     historyManager.commit();
   });
-  // Lock/unlock (docs/TASKS.md P2-7) and z-order (docs/TASKS.md P2-8):
-  // each a discrete, deliberate action like add/remove, not a
-  // continuous gesture like drag/nudge, so both commit immediately
-  // rather than through debouncedHistoryCommit.
+  // Lock/unlock (docs/TASKS.md P2-7), z-order (docs/TASKS.md P2-8) and
+  // align/distribute (docs/TASKS.md P2-9): each a discrete, deliberate
+  // action like add/remove, not a continuous gesture like drag/nudge, so
+  // all three commit immediately rather than through
+  // debouncedHistoryCommit.
   window.eventBus.on("shapeLockChanged", () => {
     historyManager.commit();
   });
   window.eventBus.on("shapeZOrderChanged", () => {
+    historyManager.commit();
+  });
+  window.eventBus.on("shapeAligned", () => {
     historyManager.commit();
   });
   window.eventBus.on("shapeDragEnded", debouncedHistoryCommit);
