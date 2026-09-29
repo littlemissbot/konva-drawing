@@ -843,3 +843,82 @@ describe("CanvasManager clipboard", () => {
     expect(canvasManager.shapes).toHaveLength(0);
   });
 });
+
+// docs/TASKS.md P2-5: arrow-key nudge.
+describe("CanvasManager.nudgeSelection", () => {
+  let container, stage, mainLayer, canvasManager;
+
+  beforeEach(() => {
+    window.eventBus = new EventBus();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    stage = new Stage({ container, width: 800, height: 600 });
+    mainLayer = new Layer();
+    stage.add(mainLayer);
+    canvasManager = new CanvasManager(stage, mainLayer, new Layer());
+  });
+
+  afterEach(() => {
+    stage.destroy();
+    container.remove();
+  });
+
+  test("moves every selected shape by the same delta", () => {
+    const a = new Circle({ x: 10, y: 10, radius: 5 });
+    const b = new Circle({ x: 50, y: 50, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    canvasManager.nudgeSelection(1, 0);
+
+    expect(a.x()).toBe(11);
+    expect(a.y()).toBe(10);
+    expect(b.x()).toBe(51);
+    expect(b.y()).toBe(50);
+  });
+
+  test("an unselected shape is left untouched", () => {
+    const a = new Circle({ x: 10, y: 10, radius: 5 });
+    const untouched = new Circle({ x: 20, y: 20, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(untouched);
+    canvasManager.selectShape(a);
+
+    canvasManager.nudgeSelection(0, 10);
+
+    expect(untouched.x()).toBe(20);
+    expect(untouched.y()).toBe(20);
+  });
+
+  test("emits shapeNudged once per call, not once per shape", () => {
+    const a = new Circle({ x: 0, y: 0, radius: 5 });
+    const b = new Circle({ x: 0, y: 0, radius: 5 });
+    canvasManager.addShape(a);
+    canvasManager.addShape(b);
+    canvasManager.selection.set([a, b]);
+
+    let events = 0;
+    window.eventBus.on("shapeNudged", () => {
+      events += 1;
+    });
+
+    canvasManager.nudgeSelection(1, 1);
+
+    expect(events).toBe(1);
+  });
+
+  test("is a no-op with nothing selected - no shapeNudged emission", () => {
+    canvasManager.addShape(new Circle({ x: 10, y: 10, radius: 5 }));
+
+    let events = 0;
+    window.eventBus.on("shapeNudged", () => {
+      events += 1;
+    });
+
+    canvasManager.nudgeSelection(5, 5);
+
+    expect(events).toBe(0);
+    expect(canvasManager.shapes[0].x()).toBe(10);
+  });
+});

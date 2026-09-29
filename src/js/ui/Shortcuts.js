@@ -38,6 +38,14 @@
  *   settings/help-overlay feature that needs to temporarily suspend
  *   shortcuts.
  */
+// Arrow-key nudge (docs/TASKS.md P2-5): 1px per press, 10px with Shift.
+const NUDGE_DELTAS = {
+  ArrowUp: { x: 0, y: -1 },
+  ArrowDown: { x: 0, y: 1 },
+  ArrowLeft: { x: -1, y: 0 },
+  ArrowRight: { x: 1, y: 0 },
+};
+
 export function bindShortcuts({
   historyManager,
   canvasManager,
@@ -218,6 +226,25 @@ export function bindShortcuts({
     if (e.key === "?" && !typing) {
       e.preventDefault();
       openHelpDialog?.();
+      return;
+    }
+
+    // Arrow-key nudge (docs/TASKS.md P2-5): moves the whole selection by
+    // 1px, or 10px with Shift held - never combined with Ctrl/Cmd (no
+    // such shortcut exists) and suppressed while typing, same as every
+    // other shortcut here; that includes TextManager's own inline-edit
+    // textarea, a real <textarea> the `typing` check already matches, so
+    // arrow keys there move the text cursor, not the shape being edited.
+    // Only prevented with something actually selected to move - same
+    // reasoning as Delete/Backspace below, so an arrow key with nothing
+    // selected still does whatever a plain arrow key normally does.
+    const nudge = NUDGE_DELTAS[e.key];
+    if (nudge && !mod && !typing) {
+      if (canvasManager.selectedShapes.length > 0) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        canvasManager.nudgeSelection(nudge.x * step, nudge.y * step);
+      }
       return;
     }
 

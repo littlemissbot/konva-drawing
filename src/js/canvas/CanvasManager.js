@@ -301,6 +301,27 @@ export class CanvasManager {
     }
   }
 
+  // Arrow-key nudge (docs/TASKS.md P2-5): moves every selected shape by
+  // the same (dx, dy) - ui/Shortcuts.js is the one real caller, passing
+  // ±1 for a plain arrow or ±10 for Shift+arrow. A no-op with nothing
+  // selected. Emits one "shapeNudged" for the whole call, not one per
+  // shape, matching removeShapes/paste's single-emission-per-batch
+  // reasoning - holding an arrow key down fires this repeatedly, and
+  // each call is already its own undo-worthy step (main.js debounces the
+  // actual history commit, the same way it already does for a drag's
+  // "shapeDragEnded"). "Honours grid when on" (the task's other stated
+  // half) is not implemented: this app has no grid/snap feature yet at
+  // all (see ui/shortcuts-data.js's own comment for the same exclusion
+  // elsewhere) - there is nothing for a nudge to honour today.
+  nudgeSelection(dx, dy) {
+    if (this.selection.size === 0) return;
+    this.selectedShapes.forEach((shape) => {
+      shape.position({ x: shape.x() + dx, y: shape.y() + dy });
+    });
+    this.updateConnections(); // also batchDraws the main layer
+    window.eventBus.emit("shapeNudged");
+  }
+
   /** Copies the current selection's shapes into this app's own in-memory
    * clipboard (see Clipboard.js for why it's not the OS clipboard). A
    * no-op with nothing selected - it does not clear a previous copy. */

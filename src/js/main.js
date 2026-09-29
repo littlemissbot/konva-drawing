@@ -349,6 +349,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.eventBus.on("shapeDeselected", markDirty);
   window.eventBus.on("shapeAdded", markDirty);
   window.eventBus.on("shapeRemoved", markDirty);
+  window.eventBus.on("shapeNudged", markDirty);
 
   window.eventBus.on("shapeAdded", () => {
     historyManager.commit();
@@ -358,6 +359,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
   window.eventBus.on("shapeDragEnded", debouncedHistoryCommit);
   window.eventBus.on("textEditCommitted", debouncedHistoryCommit);
+  // Arrow-key nudge (docs/TASKS.md P2-5): debounced the same way as a
+  // drag's own "shapeDragEnded" - holding an arrow key fires
+  // "shapeNudged" repeatedly, and each keystroke committing its own undo
+  // step would make one held-down nudge take many Ctrl+Z presses to
+  // undo, the same reasoning removeShapes/paste avoid by emitting once
+  // per batch rather than once per shape.
+  window.eventBus.on("shapeNudged", debouncedHistoryCommit);
 
   transformer.on("transformend", () => {
     debouncedHistoryCommit();
