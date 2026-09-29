@@ -1141,3 +1141,53 @@ body {
   font-size: 0.85rem;
   margin-right: auto;
 }
+
+/* Help dialog (docs/TASKS.md P2-3) */
+.help-dialog .modal-body {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px 32px;
+}
+
+.shortcuts-group h6 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #475569;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 8px;
+}
+
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.shortcuts-table td {
+  padding: 4px 0;
+  font-size: 0.9rem;
+}
+
+.shortcuts-table td:first-child {
+  color: #334155;
+}
+
+.shortcuts-table td:last-child {
+  text-align: right;
+}
+
+.shortcuts-table kbd {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.8rem;
+  font-family: inherit;
+  color: #1f2937;
+}
+
+@media (max-width: 640px) {
+  .help-dialog .modal-body {
+    grid-template-columns: 1fr;
+  }
+}

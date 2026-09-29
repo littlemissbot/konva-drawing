@@ -400,6 +400,32 @@
       </div>
     </div>
 
+    <!-- Help dialog: keyboard shortcuts (docs/TASKS.md P2-3, "?") -->
+    <div
+      class="modal fade"
+      id="helpModal"
+      tabindex="-1"
+      aria-labelledby="helpModalLabel"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content help-dialog">
+          <div class="modal-header">
+            <h5 class="modal-title" id="helpModalLabel">Keyboard shortcuts</h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body" id="helpModalBody">
+            <!-- Populated by ui/HelpDialog.js via main.js -->
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./js/main.js"></script>
   </body>
 </html>

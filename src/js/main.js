@@ -20,6 +20,12 @@ import {
   suggestedExportFilename,
 } from "./ui/ExportDialog.js";
 import { printCanvas } from "./ui/Print.js";
+import {
+  detectMac,
+  buildShortcutSections,
+  renderShortcutsHtml,
+} from "./ui/HelpDialog.js";
+import { SHORTCUT_GROUPS } from "./ui/shortcuts-data.js";
 import { bindShortcuts } from "./ui/Shortcuts.js";
 // The named import (not a bare `import "bootstrap/.../bootstrap.bundle.min.js"`
 // side-effect import) matters: that bundle is a UMD build whose global-
@@ -879,26 +885,46 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // --- Help dialog (docs/TASKS.md P2-3, "?") ---
+  const helpModalEl = document.getElementById("helpModal");
+  const helpModalBody = document.getElementById("helpModalBody");
+  function openHelpDialog() {
+    // Built fresh on every open, not once at startup: cheap (a handful
+    // of DOM rows), and correctly reflects the platform-appropriate
+    // Ctrl/⌘ symbol even if that could ever change mid-session (a
+    // future OS-detection edge case, not something worth caching
+    // around today).
+    helpModalBody.innerHTML = renderShortcutsHtml(
+      buildShortcutSections(SHORTCUT_GROUPS, detectMac())
+    );
+    Modal.getOrCreateInstance(helpModalEl).show();
+  }
+
   // All global keyboard shortcuts (undo/redo, zoom, delete, escape,
-  // JSON export/import, the export dialog, print) live in
-  // ui/Shortcuts.js, not inline here - see that file for behavior and
-  // comments. updatePropertiesPanel is a hoisted function declaration
-  // defined further down in this same scope; passing it here is safe
-  // regardless of source order since this call only runs once the whole
-  // DOMContentLoaded handler's declarations have all been hoisted.
+  // JSON export/import, the export dialog, print, tool/shape switches,
+  // zoom-to-fit, help) live in ui/Shortcuts.js, not inline here - see
+  // that file for behavior and comments. updatePropertiesPanel and
+  // zoomToFit are hoisted function declarations defined further down in
+  // this same scope; passing them here is safe regardless of source
+  // order since this call only runs once the whole DOMContentLoaded
+  // handler's declarations have all been hoisted.
   bindShortcuts({
     historyManager,
     canvasManager,
     toolManager,
+    shapeManager,
+    textManager,
     mainLayer,
     zoomIn,
     zoomOut,
     resetZoom,
+    zoomToFit,
     updatePropertiesPanel,
     exportJson,
     triggerImport,
     openExportDialog,
     printCanvas: printCanvasNow,
+    openHelpDialog,
   });
 
   // Button event listeners
