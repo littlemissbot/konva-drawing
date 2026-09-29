@@ -2,6 +2,7 @@ import { Line } from "konva/lib/shapes/Line";
 import { Group } from "konva/lib/Group";
 import { Rect } from "konva/lib/shapes/Rect";
 import { Text } from "konva/lib/shapes/Text";
+import { createId } from "../core/Document.js";
 
 const TOOL_CURSOR = "cursor";
 const TOOL_PEN = "pen";
@@ -109,6 +110,7 @@ export class ToolManager {
         listening: false,
         name: `Stroke ${this.freehandCount}`,
         toolType: "freehand",
+        id: createId(),
       });
       this.currentLine = line;
       this.canvasManager.setupShapeEvents(line, "Line");
@@ -165,6 +167,7 @@ export class ToolManager {
       listening: true,
       name,
       toolType: "sticky",
+      id: createId(),
     });
 
     const rect = new Rect({

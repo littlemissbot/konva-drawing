@@ -1,3 +1,10 @@
+// Not currently instantiated anywhere (see main.js): updateForm()
+// references a #textContent input canvas.html doesn't have, and the
+// live properties panel is driven by main.js's own inline
+// updatePropertiesPanel() instead. Left in place, unreferenced, as a
+// starting point for docs/TASKS.md P3-5, which plans to rebuild the
+// properties panel as its single source of truth - decide there
+// whether to build on this file or replace it outright.
 export class PropertyManager {
   constructor(canvasManager) {
     this.canvasManager = canvasManager;

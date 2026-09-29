@@ -1,14 +1,36 @@
 import { Stage } from "konva/lib/Stage";
 import { Layer } from "konva/lib/Layer";
-import { ShapeManager } from "./components/ShapeManager.js";
-import { PropertyManager } from "./components/PropertyManager.js";
-import { SVGManager } from "./components/SVGManager.js";
-import { CanvasManager } from "./components/CanvasManager.js";
-import { TextManager } from "./components/TextManager.js";
-import { ToolManager } from "./components/ToolManager.js";
-import { HistoryManager } from "./components/HistoryManager.js";
-import { EventBus } from "./utils/EventBus.js";
-import "bootstrap/dist/js/bootstrap.bundle.min.js";
+import { ShapeManager } from "./canvas/ShapeManager.js";
+import { SVGManager } from "./canvas/SVGManager.js";
+import { CanvasManager } from "./canvas/CanvasManager.js";
+import { TextManager } from "./canvas/TextManager.js";
+import { ToolManager } from "./canvas/ToolManager.js";
+import { HistoryManager } from "./core/HistoryManager.js";
+import { EventBus } from "./core/EventBus.js";
+import { Persistence } from "./core/Persistence.js";
+import { createEmptyDocument } from "./core/Document.js";
+import {
+  exportJsonBlob,
+  suggestedFilename,
+  readDocumentFile,
+} from "./export/json.js";
+import {
+  gatherExportOptions,
+  runExport,
+  suggestedExportFilename,
+} from "./ui/ExportDialog.js";
+import { printCanvas } from "./ui/Print.js";
+import { bindShortcuts } from "./ui/Shortcuts.js";
+// The named import (not a bare `import "bootstrap/.../bootstrap.bundle.min.js"`
+// side-effect import) matters: that bundle is a UMD build whose global-
+// scope fallback resolves to `undefined` in Vite's ESM output, so
+// nothing ever attaches a usable `window.bootstrap` - the export
+// dialog's Ctrl+E path (which calls Modal.show()/hide() programmatically,
+// not just via data-bs-toggle/dismiss attributes) silently no-op'd
+// until this was caught by e2e/export-dialog.spec.js. Modal itself
+// doesn't need Popper (only Dropdown/Tooltip/Popover do), so importing
+// just Modal from bootstrap's real ESM build needs no other setup.
+import { Modal } from "bootstrap";
 import Konva from "konva";
 
 function debounce(func, wait) {
@@ -20,7 +42,7 @@ function debounce(func, wait) {
 }
 
 // Wait for DOM to be fully loaded
-window.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", async () => {
   // Initialize event bus for communication between components
   window.eventBus = new EventBus();
 
@@ -136,7 +158,12 @@ window.addEventListener("DOMContentLoaded", () => {
   };
 
   const shapeManager = new ShapeManager(canvasManager);
-  const propertyManager = new PropertyManager(canvasManager);
+  // PropertyManager is not instantiated: nothing in this app calls it
+  // today (its updateForm() references a #textContent input this page
+  // doesn't have, and the properties panel below is driven entirely by
+  // this file's own inline updatePropertiesPanel() instead). See
+  // src/js/ui/PropertyManager.js and docs/TASKS.md P3-5, which plans to
+  // rebuild the properties panel as its single source of truth.
   const svgManager = new SVGManager(canvasManager);
   const textManager = new TextManager(canvasManager);
   canvasManager.setTextManager(textManager);
@@ -154,6 +181,10 @@ window.addEventListener("DOMContentLoaded", () => {
   window.textManager = textManager;
   window.canvasManager = canvasManager;
   window.toolManager = toolManager;
+  // svgManager.createSVG() has no UI entry point yet: the icon panel is
+  // disabled pending docs/TASKS.md P7-1. Exposed here for consistency
+  // with the other managers and so it is reachable ahead of that work.
+  window.svgManager = svgManager;
 
   document.getElementById("selectTool")?.addEventListener("click", () => {
     toolManager.setTool("cursor");
@@ -169,8 +200,6 @@ window.addEventListener("DOMContentLoaded", () => {
   // Removed save/load button event listeners as only auto-save is needed
 
   // --- Auto-save logic ---
-  let lastSavedData = null;
-  let savePending = false;
   const saveStatus = document.querySelector(".save-status");
   function showSaveStatus(msg = "All changes saved") {
     if (saveStatus) {
@@ -206,6 +235,12 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // The in-memory snapshot format HistoryManager's undo/redo uses is
+  // deliberately unchanged from before Document.js existed (see
+  // docs/TASKS.md Phase 1's scope decision: the command-based History
+  // rewrite is deferred, not this) - it only ever needs a comparable,
+  // restorable string, not full document metadata or zIndex ordering
+  // (shape array order already carries that).
   function getCurrentData() {
     return JSON.stringify({
       shapes: canvasManager.shapes.map((shape) =>
@@ -224,13 +259,10 @@ window.addEventListener("DOMContentLoaded", () => {
     mainLayer.batchDraw();
     updateAddFirstObjectCard();
     updatePropertiesPanel(null);
-    try {
-      localStorage.setItem("canvasData", json);
-      lastSavedData = json;
-    } catch (e) {
-      console.error("Failed to persist canvas after undo/redo:", e);
-    }
-    savePending = false;
+    // An undo/redo is itself a change worth persisting, same as any
+    // edit - scheduleSave, not saveNow, so rapid undo/redo presses
+    // still debounce together instead of writing on every keystroke.
+    persistence.scheduleSave(buildCurrentDocument());
   }
 
   const historyManager = new HistoryManager({
@@ -244,27 +276,62 @@ window.addEventListener("DOMContentLoaded", () => {
     historyManager.commit();
   }, 400);
 
-  const debouncedAutoSave = debounce(() => {
-    const data = getCurrentData();
-    if (data !== lastSavedData) {
-      try {
-        localStorage.setItem("canvasData", data);
-        lastSavedData = data;
-        showSaveStatus("All changes saved");
-        savePending = false;
-      } catch (e) {
-        console.error("Failed to save canvas data:", e);
+  // The persistent (localStorage/IndexedDB) document, as opposed to
+  // getCurrentData()'s lightweight undo/redo snapshot above. Starts as
+  // a fresh empty document's metadata; loadSavedCanvas() below replaces
+  // it with the loaded document's own id/name/createdAt if one exists,
+  // so re-saving keeps the same document identity across a reload
+  // rather than minting a new id on every save.
+  let currentDocument = createEmptyDocument();
+
+  // Guards a narrow startup race: loadSavedCanvas() below does its own
+  // async persistence.load() and only applies the result once that
+  // resolves, but every other listener in this handler (Clear Canvas,
+  // Ctrl+O/drag-and-drop import, ...) is already bound by the time that
+  // await is reached, and control returns to the browser's event loop
+  // right at that await - so a fast enough action (an e2e test's
+  // synthetic drop event landed here in practice; a real user doing
+  // this within single-digit milliseconds of page load is far less
+  // likely but not impossible) can run before the initial load
+  // resolves. Without this guard, the load would then silently
+  // overwrite whatever that action just did with the (possibly stale,
+  // possibly nonexistent) saved document - exactly the kind of data
+  // loss this whole phase (docs/PRD.md Phase 1) exists to prevent. Only
+  // set by actions that replace the *entire* canvas (Clear, import);
+  // an incremental edit racing this same narrow window is not worth
+  // the same protection - the load would just clobber that one change,
+  // not the whole document, and self-heals on the next commit().
+  let canvasReplacedBeforeInitialLoad = false;
+
+  function buildCurrentDocument() {
+    return {
+      ...currentDocument,
+      updatedAt: Date.now(),
+      objects: canvasManager.toDocumentObjects(),
+    };
+  }
+
+  const persistence = new Persistence({
+    debounceMs: 2000,
+    maxWaitMs: 10000,
+    onStatusChange: ({ state, backend, error }) => {
+      if (state === "saving") {
+        showSaveStatus("Saving changes...");
+      } else if (state === "saved") {
+        showSaveStatus(
+          backend === "indexeddb"
+            ? "All changes saved (backup storage)"
+            : "All changes saved"
+        );
+      } else if (state === "failed") {
+        console.error("FrameX: failed to save the document:", error);
         showSaveStatus("Failed to save changes");
       }
-    }
-  }, 2000);
+    },
+  });
 
   function markDirty() {
-    if (!savePending) {
-      savePending = true;
-      showSaveStatus("Saving changes...");
-    }
-    debouncedAutoSave();
+    persistence.scheduleSave(buildCurrentDocument());
   }
 
   // Listen for changes to trigger auto-save
@@ -303,67 +370,25 @@ window.addEventListener("DOMContentLoaded", () => {
     propertiesForm.addEventListener("input", debouncedHistoryCommit);
   }
 
-  // Periodic save every 10 seconds
-  setInterval(() => {
-    if (savePending) {
-      debouncedAutoSave();
-    }
-  }, 10000);
-
-  // Auto-load on page load
-  function autoLoad() {
-    const data = localStorage.getItem("canvasData");
-    if (data) {
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed && parsed.shapes) {
-          canvasManager.clearCanvas();
-          canvasManager.reconstructShapes(parsed.shapes);
-          canvasManager.toolManager?.refreshInteractivity();
-          mainLayer.batchDraw();
-          lastSavedData = data;
-          showSaveStatus("Canvas loaded");
-        }
-      } catch (e) {
-        showSaveStatus("Failed to load canvas");
-      }
-    }
-    // After loading, show/hide the add object card
-    const card = document.getElementById("addFirstObjectCard");
-    if (
-      window.canvasManager &&
-      window.canvasManager.shapes &&
-      window.canvasManager.shapes.length > 0
-    ) {
-      card.style.display = "none";
-    } else {
-      card.style.display = "flex";
-    }
-    historyManager.reset(getCurrentData());
-  }
-
   // Add beforeunload event listener to warn about unsaved changes
   window.addEventListener("beforeunload", (e) => {
-    if (savePending) {
+    if (persistence.isSaving) {
       e.preventDefault();
       e.returnValue = "";
     }
   });
 
-  // Call autoLoad after a short delay to ensure all components are initialized
-  setTimeout(autoLoad, 100);
-
   // Clear Canvas button
-  document.getElementById("clearBtn").addEventListener("click", () => {
+  document.getElementById("clearBtn").addEventListener("click", async () => {
     if (
       confirm(
         "Clear the entire canvas? You can use Undo (Ctrl+Z) to restore this version."
       )
     ) {
+      canvasReplacedBeforeInitialLoad = true;
       historyManager.commit();
       canvasManager.clearCanvas();
-      localStorage.removeItem("canvasData");
-      lastSavedData = null;
+      await persistence.clear();
       historyManager.commit();
       showSaveStatus("Canvas cleared");
     }
@@ -411,25 +436,14 @@ window.addEventListener("DOMContentLoaded", () => {
     window.eventBus.on("shapeAdded", updateAddFirstObjectCard);
     window.eventBus.on("shapeRemoved", updateAddFirstObjectCard);
   }
-  // Also call on load
-  window.addEventListener("DOMContentLoaded", () => {
-    // Try to load canvas data from localStorage
-    let hasShapes = false;
-    const data = localStorage.getItem("canvasData");
-    if (data) {
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed && parsed.shapes && parsed.shapes.length > 0) {
-          hasShapes = true;
-        }
-      } catch (e) {}
-    }
-    if (hasShapes) {
-      document.getElementById("addFirstObjectCard").style.display = "none";
-    } else {
-      document.getElementById("addFirstObjectCard").style.display = "flex";
-    }
-  });
+  // The card's initial state (shown/hidden based on saved data) is set
+  // once by loadSavedCanvas() near the end of this handler, not here:
+  // this file's own top-level listener (line 23) IS the DOMContentLoaded
+  // handler, so a second `window.addEventListener("DOMContentLoaded", …)`
+  // nested inside it (as this used to be) registers after the event has
+  // already fired and never runs. Registering it here duplicated that
+  // dead logic a third time (see loadSavedCanvas and the removed
+  // autoLoad) without ever executing.
 
   // --- Zoom Controls Logic ---
   let zoomLevel = 1;
@@ -554,10 +568,6 @@ window.addEventListener("DOMContentLoaded", () => {
     if (newScale !== zoomLevel) {
       zoomLevel = newScale;
 
-      // Calculate the center point of the content
-      const centerX = (minX + maxX) / 2;
-      const centerY = (minY + maxY) / 2;
-
       // Calculate the new position to center the content
       const newPos = {
         x: (stage.width() - contentWidth * newScale) / 2 - minX * newScale,
@@ -584,31 +594,316 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  // Keyboard shortcuts (zoom + undo/redo)
-  document.addEventListener("keydown", (e) => {
-    const mod = e.ctrlKey || e.metaKey;
-    if (mod && !e.target.closest("input, textarea, select")) {
-      if (e.key === "z" && !e.shiftKey) {
-        e.preventDefault();
-        historyManager.undo();
-        return;
-      }
-      if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
-        e.preventDefault();
-        historyManager.redo();
-        return;
-      }
+  // --- JSON export / import (docs/TASKS.md P1-7) ---
+  // A drawing needs to be able to leave the browser entirely, not just
+  // survive a reload via Persistence - backed up, shared, moved to
+  // another machine - and come back in exactly as saved. Export
+  // downloads the same v2 document Persistence would save; import
+  // reads one back via export/json.js's readDocumentFile
+  // (parseDocument under the hood), so a legacy v1 save imports and
+  // migrates exactly like an old localStorage save does. Only Ctrl+S/
+  // Ctrl+O and drag-and-drop per docs/TASKS.md P1-7's own scope - a
+  // toolbar entry point is P1-8's export dialog, not duplicated here.
+  function exportJson() {
+    const doc = buildCurrentDocument();
+    const blob = exportJsonBlob(doc);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = suggestedFilename(doc);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  const importFileInput = document.createElement("input");
+  importFileInput.type = "file";
+  importFileInput.accept = ".json,application/json";
+  importFileInput.style.display = "none";
+  document.body.appendChild(importFileInput);
+
+  function triggerImport() {
+    // Reset first: selecting the same file twice in a row (e.g. after
+    // fixing it and re-exporting under the same name) wouldn't fire
+    // "change" a second time otherwise, since the input's value
+    // wouldn't actually change.
+    importFileInput.value = "";
+    importFileInput.click();
+  }
+
+  async function importDocumentFromFile(file) {
+    let imported;
+    try {
+      imported = await readDocumentFile(file);
+    } catch (e) {
+      console.error("Failed to import drawing:", e);
+      alert(
+        `Could not import "${file.name}": ` +
+          (e.message || "the file is not a valid FrameX drawing.")
+      );
+      return;
     }
-    if (mod && e.key === "=") {
-      e.preventDefault();
-      zoomIn();
-    } else if (mod && e.key === "-") {
-      e.preventDefault();
-      zoomOut();
-    } else if (mod && e.key === "0") {
-      e.preventDefault();
-      resetZoom();
+
+    // Nothing to choose between if the canvas is already empty -
+    // replace and merge would do the same thing, so skip the prompt.
+    const hasExistingContent = canvasManager.shapes.length > 0;
+    const replace =
+      !hasExistingContent ||
+      confirm(
+        `Import "${file.name}"?\n\n` +
+          "Click OK to replace everything currently on the canvas, or " +
+          "Cancel to merge the imported shapes into what's already there."
+      );
+
+    canvasReplacedBeforeInitialLoad = true;
+    // Same before/after commit() pairing as the Clear Canvas handler
+    // below: the first captures whatever was on the canvas right
+    // before the import as its own undo checkpoint, the second makes
+    // the just-imported state the new one, so a single Ctrl+Z after an
+    // import goes back to exactly the pre-import canvas.
+    historyManager.commit();
+    if (replace) {
+      canvasManager.clearCanvas();
+      canvasManager.loadDocumentObjects(imported.document.objects);
+      // Adopt the imported file's own identity (id/name/timestamps) -
+      // this document IS now what's on the canvas, the same as loading
+      // a saved drawing on startup. A merge, below, keeps the current
+      // document's identity instead: it's still fundamentally the same
+      // drawing, just with more objects added to it.
+      currentDocument = imported.document;
+    } else {
+      canvasManager.mergeDocumentObjects(imported.document.objects);
     }
+    canvasManager.toolManager?.refreshInteractivity();
+    canvasManager.deselectShape();
+    transformer.nodes([]);
+    mainLayer.batchDraw();
+    updateAddFirstObjectCard();
+    updatePropertiesPanel(null);
+    historyManager.commit();
+    // Immediate, not debounced: this is one deliberate action, not a
+    // stream of edits, and the user shouldn't lose it to a closed tab
+    // in the next 2-10s the way an in-progress drag's autosave might.
+    await persistence.saveNow(buildCurrentDocument());
+    showSaveStatus(replace ? "Canvas imported" : "Canvas merged");
+  }
+
+  importFileInput.addEventListener("change", () => {
+    const file = importFileInput.files?.[0];
+    if (file) importDocumentFromFile(file);
+  });
+
+  // Drag-and-drop a .json file anywhere onto the canvas to import it,
+  // with the same replace/merge choice as Ctrl+O. Both dragover and
+  // drop must call preventDefault(): without it the browser's default
+  // behavior is to navigate away and open the dropped file directly,
+  // discarding the whole app.
+  container.addEventListener("dragover", (e) => {
+    e.preventDefault();
+  });
+  container.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const file = e.dataTransfer?.files?.[0];
+    if (file) importDocumentFromFile(file);
+  });
+
+  // --- Export Dialog (docs/TASKS.md P1-8) ---
+  // Format/scale/background/selection-only options plus a live preview
+  // thumbnail, for PNG/JPEG/PDF (JSON export has no options worth a
+  // dialog over - it's the whole document, always - so Ctrl+S above
+  // stays a direct download). ui/ExportDialog.js owns the actual
+  // option-gathering and export logic (unit-tested there, the same way
+  // as export/raster.js and export/pdf.js); everything here is just
+  // wiring those functions to this page's specific DOM elements and the
+  // Bootstrap modal already used for nothing else on this page.
+  const exportModalEl = document.getElementById("exportModal");
+  const exportFormatRadios = exportModalEl.querySelectorAll(
+    'input[name="exportFormat"]'
+  );
+  const exportScaleSelect = document.getElementById("exportScale");
+  const exportTransparentCheckbox =
+    document.getElementById("exportTransparent");
+  const exportBackgroundColorInput = document.getElementById(
+    "exportBackgroundColor"
+  );
+  const exportSelectionOnlyCheckbox = document.getElementById(
+    "exportSelectionOnly"
+  );
+  const exportPageSizeSelect = document.getElementById("exportPageSize");
+  const exportOrientationSelect = document.getElementById("exportOrientation");
+  const exportSelectableTextCheckbox = document.getElementById(
+    "exportSelectableText"
+  );
+  const exportPreviewImg = document.getElementById("exportPreviewImg");
+  const exportPreviewEmpty = document.getElementById("exportPreviewEmpty");
+  const exportTransparentRow = document.getElementById("exportTransparentRow");
+  const exportBackgroundRow = document.getElementById("exportBackgroundRow");
+  const exportPdfOptions = document.getElementById("exportPdfOptions");
+  const exportOrientationRow = document.getElementById("exportOrientationRow");
+  const exportErrorEl = document.getElementById("exportError");
+  const exportConfirmBtn = document.getElementById("exportConfirmBtn");
+
+  function currentExportElements() {
+    return {
+      formatRadios: exportFormatRadios,
+      scaleSelect: exportScaleSelect,
+      transparentCheckbox: exportTransparentCheckbox,
+      backgroundColorInput: exportBackgroundColorInput,
+      selectionOnlyCheckbox: exportSelectionOnlyCheckbox,
+      pageSizeSelect: exportPageSizeSelect,
+      orientationSelect: exportOrientationSelect,
+      selectableTextCheckbox: exportSelectableTextCheckbox,
+    };
+  }
+
+  function currentExportFormat() {
+    return [...exportFormatRadios].find((r) => r.checked)?.value || "png";
+  }
+
+  // Shows/hides each option group for the currently chosen format - a
+  // transparency toggle means nothing for JPEG/PDF (raster.js/pdf.js
+  // both always give JPEG a white background, and a PDF page is always
+  // opaque), and PDF's own page-size/orientation/selectable-text
+  // options mean nothing for a plain raster image.
+  function updateExportOptionVisibility() {
+    const format = currentExportFormat();
+    const isPdf = format === "pdf";
+    const isPng = format === "png";
+    exportPdfOptions.style.display = isPdf ? "block" : "none";
+    // A "fit to content" PDF page picks its own orientation from the
+    // content's own aspect ratio (see export/pdf.js) - orientation only
+    // means something for the fixed page sizes.
+    exportOrientationRow.style.display =
+      isPdf && exportPageSizeSelect.value !== "fit" ? "flex" : "none";
+    exportTransparentRow.style.display = isPng ? "flex" : "none";
+    exportBackgroundRow.style.display =
+      !isPng || !exportTransparentCheckbox.checked ? "flex" : "none";
+    // Exporting just the selected shape only makes sense when one is
+    // actually selected (and Phase 1 has no multi-select yet, P2-1).
+    const hasSelection = !!canvasManager.selectedShape;
+    exportSelectionOnlyCheckbox.disabled = !hasSelection;
+    if (!hasSelection) exportSelectionOnlyCheckbox.checked = false;
+  }
+
+  async function updateExportPreview() {
+    const options = gatherExportOptions(currentExportElements());
+    // Always a fast, low-resolution PNG for the preview, regardless of
+    // the chosen format/scale: even a PDF's own preview is just the
+    // same raster image it will embed (see export/pdf.js), and
+    // re-rendering at full export resolution on every option change
+    // would make the dialog feel sluggish for no visible benefit at
+    // thumbnail size. This also means the preview never touches
+    // exportPdf/jsPDF at all - only actually confirming a PDF export
+    // below does, keeping jsPDF's ~340KB chunk (docs/TASKS.md P1-8's
+    // bundle-size fix) out of the common "just look at the preview"
+    // path too.
+    const result = await runExport({
+      stage,
+      canvasManager,
+      options: {
+        ...options,
+        format: "png",
+        pixelRatio: 1,
+      },
+    });
+    if (result.ok) {
+      exportPreviewImg.src = result.dataUrl;
+      exportPreviewImg.style.display = "block";
+      exportPreviewEmpty.style.display = "none";
+    } else {
+      exportPreviewImg.style.display = "none";
+      exportPreviewEmpty.textContent =
+        result.reason === "empty" ? "Nothing to export" : result.message;
+      exportPreviewEmpty.style.display = "flex";
+    }
+  }
+
+  const debouncedUpdateExportPreview = debounce(updateExportPreview, 200);
+
+  function refreshExportDialog() {
+    updateExportOptionVisibility();
+    debouncedUpdateExportPreview();
+  }
+
+  exportModalEl.addEventListener("show.bs.modal", () => {
+    exportErrorEl.textContent = "";
+    refreshExportDialog();
+  });
+  exportModalEl.querySelectorAll("input, select").forEach((el) => {
+    el.addEventListener("change", refreshExportDialog);
+  });
+
+  exportConfirmBtn.addEventListener("click", async () => {
+    exportErrorEl.textContent = "";
+    const options = gatherExportOptions(currentExportElements());
+    // A PDF export's first jsPDF dynamic import (export/pdf.js) can take
+    // a perceptible moment - disable the button so a second click can't
+    // start an overlapping export while the first is still in flight.
+    exportConfirmBtn.disabled = true;
+    const previousLabel = exportConfirmBtn.textContent;
+    exportConfirmBtn.textContent = "Exporting...";
+    let result;
+    try {
+      result = await runExport({ stage, canvasManager, options });
+    } finally {
+      exportConfirmBtn.disabled = false;
+      exportConfirmBtn.textContent = previousLabel;
+    }
+    if (!result.ok) {
+      exportErrorEl.textContent = result.message;
+      return;
+    }
+    // A data: URL works directly as a download link's href - no need
+    // to also round-trip it through a Blob/ObjectURL the way
+    // exportJson() does above (that one starts from a document object,
+    // not a data URL already in hand).
+    const link = document.createElement("a");
+    link.href = result.dataUrl;
+    link.download = suggestedExportFilename(currentDocument, options.format);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    Modal.getOrCreateInstance(exportModalEl).hide();
+  });
+
+  function openExportDialog() {
+    Modal.getOrCreateInstance(exportModalEl).show();
+  }
+
+  // --- Print (docs/TASKS.md P1-9, Ctrl+P) ---
+  function printCanvasNow() {
+    const result = printCanvas(stage);
+    if (!result.ok) {
+      // Same failure shape and only failure mode as the export dialog's
+      // own "empty canvas" case (see ui/ExportDialog.js) - an alert is
+      // enough here since, unlike the dialog, there's no persistent
+      // error area a keyboard-only shortcut could show it in.
+      alert(result.message);
+    }
+  }
+
+  // All global keyboard shortcuts (undo/redo, zoom, delete, escape,
+  // JSON export/import, the export dialog, print) live in
+  // ui/Shortcuts.js, not inline here - see that file for behavior and
+  // comments. updatePropertiesPanel is a hoisted function declaration
+  // defined further down in this same scope; passing it here is safe
+  // regardless of source order since this call only runs once the whole
+  // DOMContentLoaded handler's declarations have all been hoisted.
+  bindShortcuts({
+    historyManager,
+    canvasManager,
+    toolManager,
+    transformer,
+    mainLayer,
+    zoomIn,
+    zoomOut,
+    resetZoom,
+    updatePropertiesPanel,
+    exportJson,
+    triggerImport,
+    openExportDialog,
+    printCanvas: printCanvasNow,
   });
 
   // Button event listeners
@@ -662,13 +957,16 @@ window.addEventListener("DOMContentLoaded", () => {
   }
 
   // Add shape/text to canvas on menu button click
+  // Arrow, Polyline, Curved Arrow, Rounded Square, Diamond, Speech Bubble
+  // and Arrowed Box are Phase 3 work (docs/TASKS.md P3-2): their buttons
+  // are hidden in canvas.html until ShapeManager implements them.
   const shapeBtnMap = [
     { id: "addSquare", method: "createSquare" },
     { id: "addRectangle", method: "createRectangle" },
     { id: "addCircle", method: "createCircle" },
     { id: "addTriangle", method: "createTriangle" },
+    { id: "addStar", method: "createStar" },
     { id: "addLine", method: "createLine" },
-    { id: "addArrow", method: "createArrow" },
   ];
 
   shapeBtnMap.forEach(({ id, method }) => {
@@ -767,33 +1065,71 @@ window.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Add a function to check and restore canvas data
-  function checkAndRestoreCanvas() {
-    const data = localStorage.getItem("canvasData");
-    if (data) {
-      try {
-        const parsed = JSON.parse(data);
-        if (parsed && parsed.shapes && parsed.shapes.length > 0) {
-          // Clear existing canvas
-          canvasManager.clearCanvas();
-          // Reconstruct shapes from saved data
-          canvasManager.reconstructShapes(parsed.shapes);
-          canvasManager.toolManager?.refreshInteractivity();
-          mainLayer.batchDraw();
-          showSaveStatus("Canvas restored");
-          historyManager.reset(getCurrentData());
-          return true;
-        }
-      } catch (e) {
-        console.error("Failed to restore canvas:", e);
-      }
+  // Single entry point for loading a saved drawing on startup. This
+  // replaces three previous, partially-redundant load paths that ran on
+  // every page load (docs/TASKS.md P0-2): a synchronous
+  // checkAndRestoreCanvas() call right here, a setTimeout(autoLoad, 100)
+  // that unconditionally re-ran the same reconstruction ~100ms later on
+  // top of whatever checkAndRestoreCanvas had already loaded, and a
+  // nested `DOMContentLoaded` listener (dead code - this whole file is
+  // already inside the outer DOMContentLoaded handler, so a second one
+  // registered from within it fires too late to ever run) that
+  // duplicated the card-visibility check a third time. Called once,
+  // synchronously, at the end of this handler: every manager it touches
+  // (canvasManager, historyManager, toolManager) is already constructed
+  // by this point, so no artificial delay is needed.
+  async function loadSavedCanvas() {
+    let loaded = null;
+    let migrated = false;
+    let loadFailed = false;
+    try {
+      ({ document: loaded, migrated } = await persistence.load());
+    } catch (e) {
+      console.error("Failed to restore canvas:", e);
+      loadFailed = true;
     }
-    return false;
+
+    // See canvasReplacedBeforeInitialLoad's own comment above: Clear
+    // Canvas or an import already ran while this load was still in
+    // flight, so applying it now (or resetting undo history to just
+    // this one state, below) would silently discard what that action
+    // just did. Whichever landed first wins; this one is dropped.
+    if (canvasReplacedBeforeInitialLoad) return;
+
+    if (loadFailed) {
+      showSaveStatus("Failed to load canvas");
+    } else if (loaded) {
+      // Keep the loaded document's own id/name/createdAt so re-saving
+      // preserves its identity instead of minting a new document on
+      // every reload; a legitimately-saved empty canvas (every shape
+      // deleted one by one, not via Clear Canvas) still counts as a
+      // real restore, unlike the pre-Document.js version of this
+      // function, which only treated a *non-empty* saved shapes array
+      // as a restore - Document.js's schema is explicit that an empty
+      // objects array is still a valid, real document.
+      currentDocument = loaded;
+      canvasManager.clearCanvas();
+      canvasManager.loadDocumentObjects(loaded.objects);
+      canvasManager.toolManager?.refreshInteractivity();
+      mainLayer.batchDraw();
+      if (migrated) {
+        // Write the upgraded v2 format back immediately so a reload
+        // before the next edit still finds it, rather than silently
+        // re-migrating from the old format on every load until the
+        // user happens to make a change. Before showing "Canvas
+        // restored" below, not after: saveNow's own status callback
+        // sets the same .save-status-text element to "All changes
+        // saved", which would otherwise silently overwrite the more
+        // informative "Canvas restored" message a moment later.
+        await persistence.saveNow(buildCurrentDocument());
+      }
+      showSaveStatus("Canvas restored");
+    } else {
+      showSaveStatus("No saved canvas found");
+    }
+    historyManager.reset(getCurrentData());
+    updateAddFirstObjectCard();
   }
 
-  // Call the restore function
-  if (!checkAndRestoreCanvas()) {
-    showSaveStatus("No saved canvas found");
-    historyManager.reset(getCurrentData());
-  }
+  await loadSavedCanvas();
 });

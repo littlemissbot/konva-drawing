@@ -3,6 +3,7 @@ import { Rect } from "konva/lib/shapes/Rect";
 import { Line } from "konva/lib/shapes/Line";
 import { RegularPolygon } from "konva/lib/shapes/RegularPolygon";
 import { Star } from "konva/lib/shapes/Star";
+import { createId } from "../core/Document.js";
 
 export class ShapeManager {
   constructor(canvasManager) {
@@ -35,9 +36,10 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
-    this.setupShapeEvents(circle, "Circle");
+    this.canvasManager.setupShapeEvents(circle, "Circle");
     this.canvasManager.addShape(circle);
     window.eventBus.emit("shapeAdded");
   }
@@ -54,9 +56,10 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
-    this.setupShapeEvents(rect, "Rectangle");
+    this.canvasManager.setupShapeEvents(rect, "Rectangle");
     this.canvasManager.addShape(rect);
     window.eventBus.emit("shapeAdded");
   }
@@ -73,9 +76,10 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
-    this.setupShapeEvents(square, "Square");
+    this.canvasManager.setupShapeEvents(square, "Square");
     this.canvasManager.addShape(square);
     window.eventBus.emit("shapeAdded");
   }
@@ -92,9 +96,10 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
-    this.setupShapeEvents(triangle, "Triangle");
+    this.canvasManager.setupShapeEvents(triangle, "Triangle");
     this.canvasManager.addShape(triangle);
     window.eventBus.emit("shapeAdded");
   }
@@ -112,9 +117,10 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
-    this.setupShapeEvents(line, "Line");
+    this.canvasManager.setupShapeEvents(line, "Line");
     this.canvasManager.addShape(line);
     window.eventBus.emit("shapeAdded");
   }
@@ -132,20 +138,11 @@ export class ShapeManager {
       strokeWidth: 2,
       draggable: true,
       name,
+      id: createId(),
     });
 
-    this.setupShapeEvents(star, "Star");
+    this.canvasManager.setupShapeEvents(star, "Star");
     this.canvasManager.addShape(star);
     window.eventBus.emit("shapeAdded");
-  }
-
-  setupShapeEvents(shape, name) {
-    shape.on("click", () => {
-      window.eventBus.emit("shapeSelected", shape);
-    });
-
-    shape.on("dragmove", () => {
-      this.canvasManager.mainLayer.batchDraw();
-    });
   }
 }

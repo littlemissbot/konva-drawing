@@ -1,4 +1,5 @@
 import Konva from "konva";
+import { createId } from "../core/Document.js";
 
 export class SVGManager {
   constructor(canvasManager) {
@@ -36,6 +37,14 @@ export class SVGManager {
         height: 50,
         draggable: true,
         name,
+        id: createId(),
+        // Stable, origin-independent reference for save/reload. Do not
+        // read this back from image.image().src for persistence: the
+        // browser always resolves that to an absolute URL (protocol +
+        // host + path at the moment it was set), which breaks the moment
+        // the app is served from a different origin. See
+        // CanvasManager.toStorageShape / reconstructShapes.
+        iconFile: svgFile,
       });
       this.setupSVGEvents(image, svgFile);
       this.canvasManager.addShape(image);

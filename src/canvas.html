@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -35,10 +35,6 @@
     </script>
 
     <link rel="stylesheet" href="./css/style.css" />
-    <link
-      rel="stylesheet"
-      href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/5.3.2/css/bootstrap.min.css"
-    />
   </head>
   <body>
     <!-- Floating Logo -->
@@ -71,6 +67,15 @@
         />
         <span class="save-status-text">All Changes Saved</span>
       </span>
+      <button
+        class="btn-export"
+        id="exportBtn"
+        title="Export (Ctrl/Cmd E)"
+        data-bs-toggle="modal"
+        data-bs-target="#exportModal"
+      >
+        Export
+      </button>
       <button class="btn-clear" id="clearBtn">Clear</button>
     </div>
 
@@ -110,13 +115,34 @@
         <button class="shape-menu-btn" id="addLine" title="Line">
           <img src="./assets/icons/line.svg" alt="Line" />
         </button>
-        <button class="shape-menu-btn" id="addArrow" title="Arrow">
+        <!--
+          Arrow, Polyline and Curved Arrow are placeholders for Phase 3
+          (see docs/TASKS.md P3-2): no icon asset and no ShapeManager
+          method exist yet, so the controls are hidden rather than left
+          as dead buttons.
+        -->
+        <button
+          class="shape-menu-btn"
+          id="addArrow"
+          title="Arrow"
+          style="display: none"
+        >
           <img src="./assets/icons/arrow.svg" alt="Arrow" />
         </button>
-        <button class="shape-menu-btn" id="addPolyline" title="Polyline">
+        <button
+          class="shape-menu-btn"
+          id="addPolyline"
+          title="Polyline"
+          style="display: none"
+        >
           <img src="./assets/icons/polyline.svg" alt="Polyline" />
         </button>
-        <button class="shape-menu-btn" id="addCurvedArrow" title="Curved Arrow">
+        <button
+          class="shape-menu-btn"
+          id="addCurvedArrow"
+          title="Curved Arrow"
+          style="display: none"
+        >
           <img src="./assets/icons/curved-arrow.svg" alt="Curved Arrow" />
         </button>
       </div>
@@ -125,17 +151,28 @@
         <button class="shape-menu-btn" id="addSquare" title="Square">
           <img src="./assets/icons/square.svg" alt="Square" />
         </button>
+        <button class="shape-menu-btn" id="addRectangle" title="Rectangle">
+          <img src="./assets/icons/rectangle.svg" alt="Rectangle" />
+        </button>
+        <!-- Rounded Square: Phase 3 placeholder, see docs/TASKS.md P3-2 -->
         <button
           class="shape-menu-btn"
           id="addRoundedSquare"
           title="Rounded Square"
+          style="display: none"
         >
           <img src="./assets/icons/rounded-square.svg" alt="Rounded Square" />
         </button>
         <button class="shape-menu-btn" id="addCircle" title="Circle">
           <img src="./assets/icons/circle.svg" alt="Circle" />
         </button>
-        <button class="shape-menu-btn" id="addDiamond" title="Diamond">
+        <!-- Diamond: Phase 3 placeholder, see docs/TASKS.md P3-2 -->
+        <button
+          class="shape-menu-btn"
+          id="addDiamond"
+          title="Diamond"
+          style="display: none"
+        >
           <img src="./assets/icons/diamond.svg" alt="Diamond" />
         </button>
         <button class="shape-menu-btn" id="addStar" title="Star">
@@ -144,18 +181,31 @@
         <button class="shape-menu-btn" id="addTriangle" title="Triangle">
           <img src="./assets/icons/triangle.svg" alt="Triangle" />
         </button>
+        <!--
+          Speech Bubble and Arrowed Box: Phase 3 placeholders, see
+          docs/TASKS.md P3-2.
+        -->
         <button
           class="shape-menu-btn"
           id="addSpeechBubble"
           title="Speech Bubble"
+          style="display: none"
         >
           <img src="./assets/icons/speech-bubble.svg" alt="Speech Bubble" />
         </button>
-        <button class="shape-menu-btn" id="addArrowedBox" title="Arrowed Box">
+        <button
+          class="shape-menu-btn"
+          id="addArrowedBox"
+          title="Arrowed Box"
+          style="display: none"
+        >
           <img src="./assets/icons/arrowed-box.svg" alt="Arrowed Box" />
         </button>
       </div>
-      <button class="shapes-menu-more-btn">More shapes</button>
+      <!-- "More shapes" has no handler yet; hidden until Phase 3 (P3-2). -->
+      <button class="shapes-menu-more-btn" style="display: none">
+        More shapes
+      </button>
     </div>
 
     <!-- Zoom Controls: Bottom Right -->
@@ -213,6 +263,140 @@
         <img src="./assets/icons/add-object.svg" alt="Add Object" height="48" />
         <div>Add your first object</div>
         <button class="close-card" id="closeAddObjectCard">×</button>
+      </div>
+    </div>
+
+    <!-- Export Dialog (docs/TASKS.md P1-8) -->
+    <div
+      class="modal fade"
+      id="exportModal"
+      tabindex="-1"
+      aria-labelledby="exportModalLabel"
+      aria-hidden="true"
+    >
+      <div class="modal-dialog">
+        <div class="modal-content export-dialog">
+          <div class="modal-header">
+            <h5 class="modal-title" id="exportModalLabel">Export</h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body">
+            <div class="export-preview">
+              <img id="exportPreviewImg" alt="Export preview" />
+              <div class="export-preview-empty" id="exportPreviewEmpty">
+                Nothing to export
+              </div>
+            </div>
+
+            <div class="export-options">
+              <fieldset class="export-format-group">
+                <legend>Format</legend>
+                <label
+                  ><input
+                    type="radio"
+                    name="exportFormat"
+                    id="exportFormatPng"
+                    value="png"
+                    checked
+                  />
+                  PNG</label
+                >
+                <label
+                  ><input
+                    type="radio"
+                    name="exportFormat"
+                    id="exportFormatJpeg"
+                    value="jpeg"
+                  />
+                  JPEG</label
+                >
+                <label
+                  ><input
+                    type="radio"
+                    name="exportFormat"
+                    id="exportFormatPdf"
+                    value="pdf"
+                  />
+                  PDF</label
+                >
+              </fieldset>
+
+              <div class="export-option-row">
+                <label for="exportScale">Scale</label>
+                <select id="exportScale">
+                  <option value="1">1x</option>
+                  <option value="2" selected>2x</option>
+                  <option value="3">3x</option>
+                  <option value="4">4x</option>
+                </select>
+              </div>
+
+              <div class="export-option-row" id="exportTransparentRow">
+                <label
+                  ><input type="checkbox" id="exportTransparent" checked />
+                  Transparent background</label
+                >
+              </div>
+              <div class="export-option-row" id="exportBackgroundRow">
+                <label for="exportBackgroundColor">Background color</label>
+                <input
+                  type="color"
+                  id="exportBackgroundColor"
+                  value="#ffffff"
+                />
+              </div>
+
+              <div class="export-option-row">
+                <label
+                  ><input type="checkbox" id="exportSelectionOnly" /> Selected
+                  object only</label
+                >
+              </div>
+
+              <div id="exportPdfOptions" style="display: none">
+                <div class="export-option-row">
+                  <label for="exportPageSize">Page size</label>
+                  <select id="exportPageSize">
+                    <option value="fit" selected>Fit to content</option>
+                    <option value="a4">A4</option>
+                    <option value="letter">Letter</option>
+                  </select>
+                </div>
+                <div class="export-option-row" id="exportOrientationRow">
+                  <label for="exportOrientation">Orientation</label>
+                  <select id="exportOrientation">
+                    <option value="landscape" selected>Landscape</option>
+                    <option value="portrait">Portrait</option>
+                  </select>
+                </div>
+                <div class="export-option-row">
+                  <label
+                    ><input type="checkbox" id="exportSelectableText" checked />
+                    Selectable text</label
+                  >
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <span class="export-error" id="exportError"></span>
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Cancel
+            </button>
+            <button type="button" class="btn btn-primary" id="exportConfirmBtn">
+              Export
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
