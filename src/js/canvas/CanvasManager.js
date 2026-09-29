@@ -479,6 +479,90 @@ export class CanvasManager {
     window.eventBus.emit("shapeLockChanged");
   }
 
+  // Z-order (docs/TASKS.md P2-8): `this.shapes`' own array order is
+  // already this app's one source of truth for stacking order
+  // (toDocumentObjects/addShape's own comments) - these four just
+  // reorder that array, then replay it onto Konva's real paint order via
+  // each shape's own moveToTop() (see _reorderSelection's own comment
+  // for why not Container.add()). A no-op with nothing selected; each is
+  // a single eventBus emission (immediate history commit, like
+  // group/lock) regardless of how many shapes move.
+
+  /** Moves every selected shape above everything else, preserving their
+   * own relative order to each other. */
+  bringToFront() {
+    this._reorderSelection((selected, rest, moved) => [...rest, ...moved]);
+  }
+
+  /** Moves every selected shape below everything else, preserving their
+   * own relative order to each other. */
+  sendToBack() {
+    this._reorderSelection((selected, rest, moved) => [...moved, ...rest]);
+  }
+
+  /** Moves each selected shape up past its nearest unselected neighbor
+   * (not past another selected shape) - a contiguous selected block
+   * shifts up by one as a whole; a scattered selection has each of its
+   * shapes hop its own neighbor independently. */
+  bringForward() {
+    this._reorderSelection((selected) => {
+      const next = [...this.shapes];
+      for (let i = next.length - 2; i >= 0; i--) {
+        if (selected.has(next[i]) && !selected.has(next[i + 1])) {
+          [next[i], next[i + 1]] = [next[i + 1], next[i]];
+        }
+      }
+      return next;
+    });
+  }
+
+  /** The mirror of bringForward: each selected shape moves down past its
+   * nearest unselected neighbor. */
+  sendBackward() {
+    this._reorderSelection((selected) => {
+      const next = [...this.shapes];
+      for (let i = 1; i < next.length; i++) {
+        if (selected.has(next[i]) && !selected.has(next[i - 1])) {
+          [next[i], next[i - 1]] = [next[i - 1], next[i]];
+        }
+      }
+      return next;
+    });
+  }
+
+  // Shared tail: `compute(selectedSet, rest, moved)` returns the new
+  // `this.shapes` order. `rest`/`moved` (the unselected/selected shapes,
+  // each in their own existing z-order - NOT `this.selectedShapes`'
+  // selection-insertion order, which is a different thing entirely and
+  // would silently reorder a multi-selection's shapes relative to each
+  // other, caught by a unit test asserting the *expected* z-order-
+  // preserving output before this split existed) are only meaningful
+  // for the front/back callers above; forward/backward take just the
+  // Set (for its .has() lookups) and compute their result directly from
+  // `this.shapes`.
+  _reorderSelection(compute) {
+    const shapes = this.selectedShapes;
+    if (shapes.length === 0) return;
+    const selected = new Set(shapes);
+    const rest = this.shapes.filter((s) => !selected.has(s));
+    const moved = this.shapes.filter((s) => selected.has(s));
+    this.shapes = compute(selected, rest, moved);
+    // Replays the new order onto Konva's actual paint order - NOT via
+    // mainLayer.add(shape): Container.add() delegates to Node.moveTo(),
+    // which no-ops whenever the node's parent is already the target
+    // container (true for every shape here, since they never leave
+    // mainLayer), silently leaving Konva's real child order completely
+    // untouched. Node.moveToTop() has no such same-parent guard - it
+    // unconditionally splices the node out and re-pushes it - so
+    // calling it on every shape in the new array's order rebuilds
+    // Konva's own children array to match. Caught by a unit test that
+    // checked mainLayer's actual children order, not just
+    // `this.shapes` itself (which was already correct either way).
+    this.shapes.forEach((shape) => shape.moveToTop());
+    this.mainLayer.batchDraw();
+    window.eventBus.emit("shapeZOrderChanged");
+  }
+
   /** Copies the current selection's shapes into this app's own in-memory
    * clipboard (see Clipboard.js for why it's not the OS clipboard). A
    * no-op with nothing selected - it does not clear a previous copy. */

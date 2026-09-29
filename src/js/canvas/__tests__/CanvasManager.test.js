@@ -1453,3 +1453,144 @@ describe("CanvasManager.toggleLockSelection", () => {
     ]);
   });
 });
+
+// docs/TASKS.md P2-8: z-order.
+describe("CanvasManager z-order", () => {
+  let container, stage, mainLayer, canvasManager;
+
+  beforeEach(() => {
+    window.eventBus = new EventBus();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    stage = new Stage({ container, width: 800, height: 600 });
+    mainLayer = new Layer();
+    stage.add(mainLayer);
+    canvasManager = new CanvasManager(stage, mainLayer, new Layer());
+  });
+
+  afterEach(() => {
+    stage.destroy();
+    container.remove();
+  });
+
+  function addNamed(...names) {
+    const shapes = names.map(
+      (name) => new Circle({ x: 0, y: 0, radius: 5, name })
+    );
+    shapes.forEach((s) => canvasManager.addShape(s));
+    return shapes;
+  }
+
+  function names() {
+    return canvasManager.shapes.map((s) => s.getAttr("name"));
+  }
+
+  test("each is a no-op with nothing selected", () => {
+    addNamed("A", "B");
+    let events = 0;
+    window.eventBus.on("shapeZOrderChanged", () => {
+      events += 1;
+    });
+
+    canvasManager.bringToFront();
+    canvasManager.sendToBack();
+    canvasManager.bringForward();
+    canvasManager.sendBackward();
+
+    expect(events).toBe(0);
+    expect(names()).toEqual(["A", "B"]);
+  });
+
+  test("bringToFront moves the selection above everything, preserving its own relative order", () => {
+    const [a, b] = addNamed("A", "B", "C", "D");
+    canvasManager.selection.set([b, a]); // selected out of original order
+
+    canvasManager.bringToFront();
+
+    expect(names()).toEqual(["C", "D", "A", "B"]);
+    // Konva's actual paint order (mainLayer children) matches too, not
+    // just the JS array.
+    expect(mainLayer.getChildren().map((s) => s.getAttr("name"))).toEqual([
+      "C",
+      "D",
+      "A",
+      "B",
+    ]);
+  });
+
+  test("sendToBack moves the selection below everything, preserving its own relative order", () => {
+    const [a, b] = addNamed("A", "B", "C", "D");
+    canvasManager.selection.set([b, a]);
+
+    canvasManager.sendToBack();
+
+    expect(names()).toEqual(["A", "B", "C", "D"]);
+  });
+
+  test("bringForward moves each selected shape up past its nearest unselected neighbor", () => {
+    const [, b, , d] = addNamed("A", "B", "C", "D", "E");
+    canvasManager.selection.set([b, d]);
+
+    canvasManager.bringForward();
+
+    expect(names()).toEqual(["A", "C", "B", "E", "D"]);
+  });
+
+  test("bringForward shifts a contiguous selected block up by one, keeping the block's own order", () => {
+    addNamed("A", "B", "C", "D", "E");
+    canvasManager.selection.set([
+      canvasManager.shapes[2],
+      canvasManager.shapes[3],
+    ]); // C, D
+
+    canvasManager.bringForward();
+
+    expect(names()).toEqual(["A", "B", "E", "C", "D"]);
+  });
+
+  test("bringForward on an already-topmost selection changes nothing", () => {
+    addNamed("A", "B", "C");
+    canvasManager.selection.set([canvasManager.shapes[2]]); // C, already on top
+
+    canvasManager.bringForward();
+
+    expect(names()).toEqual(["A", "B", "C"]);
+  });
+
+  test("sendBackward moves each selected shape down past its nearest unselected neighbor", () => {
+    addNamed("A", "B", "C", "D", "E");
+    canvasManager.selection.set([
+      canvasManager.shapes[1],
+      canvasManager.shapes[3],
+    ]); // B, D
+
+    canvasManager.sendBackward();
+
+    expect(names()).toEqual(["B", "A", "D", "C", "E"]);
+  });
+
+  test("sendBackward on an already-bottommost selection changes nothing", () => {
+    addNamed("A", "B", "C");
+    canvasManager.selection.set([canvasManager.shapes[0]]); // A, already at the bottom
+
+    canvasManager.sendBackward();
+
+    expect(names()).toEqual(["A", "B", "C"]);
+  });
+
+  test("emits shapeZOrderChanged once per call, regardless of how many shapes moved", () => {
+    addNamed("A", "B", "C");
+    canvasManager.selection.set([
+      canvasManager.shapes[0],
+      canvasManager.shapes[1],
+    ]);
+
+    let events = 0;
+    window.eventBus.on("shapeZOrderChanged", () => {
+      events += 1;
+    });
+    canvasManager.bringToFront();
+
+    expect(events).toBe(1);
+  });
+});

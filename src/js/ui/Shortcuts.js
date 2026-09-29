@@ -178,6 +178,25 @@ export function bindShortcuts({
         canvasManager.toggleLockSelection();
         return;
       }
+      // Ctrl/Cmd+] / +[ (+ Shift for "to front"/"to back"): z-order
+      // (docs/TASKS.md P2-8). Reads e.code, not e.key, for the same
+      // reason Shift+1's own comment above does - Shift+] reports e.key
+      // as "}" on a US layout (the character Shift actually produces),
+      // not "]", which would make the Shift-held variants layout-
+      // dependent and simply never match; e.code identifies the
+      // physical bracket key regardless of what Shift turns it into.
+      if (e.code === "BracketRight") {
+        e.preventDefault();
+        if (e.shiftKey) canvasManager.bringToFront();
+        else canvasManager.bringForward();
+        return;
+      }
+      if (e.code === "BracketLeft") {
+        e.preventDefault();
+        if (e.shiftKey) canvasManager.sendToBack();
+        else canvasManager.sendBackward();
+        return;
+      }
     }
     if (mod && e.key === "=") {
       e.preventDefault();
